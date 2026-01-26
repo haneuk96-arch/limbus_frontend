@@ -20,7 +20,27 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: #0b0b0c; /* 고정값 */
+  color: #ededed;       /* 고정값 */
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* 부드러운 페이드인 / 슬라이드 업 애니메이션 */
+@keyframes fade-in-soft {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-soft {
+  animation: fade-in-soft 0.25s ease-out;
+}
+
+.fade-in-soft-delayed {
+  animation: fade-in-soft 0.35s ease-out;
 }
