@@ -201,175 +201,147 @@ export default function EgoGiftPreview({
         </div>
         <div className="p-5">
 
-        {/* 상단 정보 영역 */}
-        <div className="relative grid grid-cols-1 md:grid-cols-[auto_300px] gap-4">
-          {/* 왼쪽 영역 */}
-          <div className="flex gap-4">
-            {/* 이미지 프레임 */}
-            <div className="relative w-28 h-28 flex-shrink-0">
-              {/* 프레임 배경 이미지 */}
-              <img
-                src="/images/egogift/egogift_frame.webp"
-                alt="frame"
-                className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none z-0"
-              />
-
-              {/* 등급 표시 */}
-              <div 
-                className={`absolute top-1 -left-3 z-20 text-[#ffcc33] scale-x-[0.65] text-5xl drop-shadow-[0_0_5px_rgba(0,0,0,0.9)] select-none tracking-tight leading-none ${isEX ? "font-bold" : `font-black ${montserrat.className}`}`}
-                style={{ fontFamily: montserrat.style.fontFamily }}
-              >
-                {displayGrade}
-              </div>
-
-              {/* 키워드 아이콘 (범용이 아닐 때) */}
-              {keywordId && keywordId !== "0" && keywordIcon && (
-                <div className="absolute bottom-[5px] right-[0px] w-9 h-9 z-20 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]">
+        {/* 상단 정보 영역: table로 영역별 독립 배치 */}
+        <table className="w-full border-collapse">
+          <tbody>
+            <tr>
+              {/* 이미지 영역 */}
+              <td className="align-top w-0 whitespace-nowrap pr-4 pb-4 md:pb-0">
+                <div className="relative w-28 h-28 flex-shrink-0">
                   <img
-                    src={keywordIcon}
-                    alt={keywordName}
-                    className="w-full h-full object-contain"
+                    src="/images/egogift/egogift_frame.webp"
+                    alt="frame"
+                    className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none z-0"
                   />
-                </div>
-              )}
-
-              {/* 실제 이미지 */}
-              {file ? (
-                <img
-                  src={URL.createObjectURL(file)}
-                  alt={giftName || "미리보기"}
-                  className="absolute inset-0 w-[70%] h-[70%] object-contain m-auto z-10"
-                />
-              ) : existingFile ? (
-                <img
-                  src={`${API_BASE_URL.replace('/api', '')}${existingFile.path}`}
-                  alt={existingFile.originalName || "미리보기"}
-                  className="absolute inset-0 w-[70%] h-[70%] object-contain m-auto z-10"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }}
-                />
-              ) : (
-                <div className="absolute inset-0 w-[70%] h-[70%] m-auto z-10 bg-[#1a1a1a] flex items-center justify-center rounded">
-                  <span className="text-gray-500 text-xs">이미지 없음</span>
-                </div>
-              )}
-            </div>
-
-            {/* 기본 정보 */}
-            <div className="flex flex-col justify-center">
-              <div className="flex items-center gap-2">
-                <span 
-                  className={`text-[#ffcc33] font-black text-2xl scale-x-[0.65] tracking-tight leading-none ${isEX ? "" : montserrat.className}`}
-                  style={{ fontFamily: montserrat.style.fontFamily }}
-                >
-                  {displayGrade}
-                </span>
-                <h2 className="text-2xl font-bold text-[#d2b48c] drop-shadow-[0_0_6px_rgba(255,200,50,0.4)]">
-                  {giftName || "미입력"}
-                </h2>
-              </div>
-              {/* 카드팩 출현 정보 - 카테고리명 표시 */}
-              {cardPackAppearances && cardPackAppearances.length > 0 && (
-                <div className="text-sm mt-1 flex flex-wrap gap-2 items-center">
-                  {cardPackAppearances.map((appearance, idx) => (
-                    <span key={appearance.categoryName || idx} style={{ color: '#ccff00' }}>
-                      {appearance.categoryName ? `"${appearance.categoryName}"` : ''}
-                      {idx < cardPackAppearances.length - 1 && <span className="text-gray-400">, </span>}
-                    </span>
-                  ))}
-                  <span className="text-gray-400"> 카드팩 출현</span>
-                </div>
-              )}
-              {/* 레거시 호환: limitedCategoryName만 있는 경우 */}
-              {(!cardPackAppearances || cardPackAppearances.length === 0) && limitedCategoryName && (
-                <div className="text-sm mt-1" style={{ color: '#ccff00' }}>
-                  "{limitedCategoryName}" 카드팩 출현
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 mt-1 text-base">
-                {keywordId && keywordId !== "0" && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-yellow-400 font-medium">
-                      {keywordName}
-                    </span>
+                  <div
+                    className={`absolute top-1 -left-3 z-20 text-[#ffcc33] scale-x-[0.65] text-5xl drop-shadow-[0_0_5px_rgba(0,0,0,0.9)] select-none tracking-tight leading-none ${isEX ? "font-bold" : `font-black ${montserrat.className}`}`}
+                    style={{ fontFamily: montserrat.style.fontFamily }}
+                  >
+                    {displayGrade}
                   </div>
-                )}
-
-                {cost && (
-                  <div className="flex items-center gap-1">
-                    <img 
-                      src="/images/keyword/cost.webp" 
-                      alt="cost" 
-                      className="w-4 h-4 object-contain"
+                  {keywordId && keywordId !== "0" && keywordIcon && (
+                    <div className="absolute bottom-[5px] right-[0px] w-9 h-9 z-20 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]">
+                      <img src={keywordIcon} alt={keywordName} className="w-full h-full object-contain" />
+                    </div>
+                  )}
+                  {file ? (
+                    <img
+                      src={URL.createObjectURL(file)}
+                      alt={giftName || "미리보기"}
+                      className="absolute inset-0 w-[70%] h-[70%] object-contain m-auto z-10"
                     />
-                    <span className="text-yellow-400">{cost}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400 mt-1">
-                <div className="flex items-center gap-1">
-                  <span>강화</span>
-                  {enhanceYn === "Y" ? (
-                    <span className="text-green-400">가능</span>
+                  ) : existingFile ? (
+                    <img
+                      src={`${API_BASE_URL.replace('/api', '')}${existingFile.path}`}
+                      alt={existingFile.originalName || "미리보기"}
+                      className="absolute inset-0 w-[70%] h-[70%] object-contain m-auto z-10"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
                   ) : (
-                    <span className="text-red-400">불가</span>
+                    <div className="absolute inset-0 w-[70%] h-[70%] m-auto z-10 bg-[#1a1a1a] flex items-center justify-center rounded">
+                      <span className="text-gray-500 text-xs">이미지 없음</span>
+                    </div>
                   )}
                 </div>
-
-                {grades && grades.length > 0 && (
-                  <div className="flex items-center gap-1 text-xs flex-wrap">
-                    {grades.includes("N") && (
-                      <span className="px-2 py-0.5 rounded bg-green-900/40 border border-green-500/60 text-green-200">
-                        노말
-                      </span>
-                    )}
-                    {grades.includes("H") && (
-                      <span className="px-2 py-0.5 rounded bg-pink-900/40 border border-pink-500/60 text-pink-200">
-                        하드
-                      </span>
-                    )}
-                    {grades.includes("E") && (
-                      <span className="px-2 py-0.5 rounded bg-red-900/40 border border-red-500/60 text-red-200">
-                        익스트림
-                      </span>
-                    )}
-                    {synthesisYn === "Y" && (
-                      <span className="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-500/60 text-purple-200">
-                        합성전용
-                      </span>
-                    )}
-                  </div>
-                )}
-                {(!grades || grades.length === 0) && synthesisYn === "Y" && (
-                  <div className="flex items-center gap-1 text-xs">
-                    <span className="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-500/60 text-purple-200">
-                      합성전용
+              </td>
+              {/* 이름 및 정보 영역 */}
+              <td className="align-top min-w-0 pr-4 pb-4 md:pb-0">
+                <div className="flex flex-col justify-center">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[#ffcc33] font-black text-2xl scale-x-[0.65] tracking-tight leading-none ${isEX ? "" : montserrat.className}`}
+                      style={{ fontFamily: montserrat.style.fontFamily }}
+                    >
+                      {displayGrade}
                     </span>
+                    <h2 className="text-2xl font-bold text-[#d2b48c] drop-shadow-[0_0_6px_rgba(255,200,50,0.4)]">
+                      {giftName || "미입력"}
+                    </h2>
                   </div>
+                  {cardPackAppearances && cardPackAppearances.length > 0 && (
+                    <div className="text-sm mt-1 flex flex-wrap gap-2 items-center">
+                      {cardPackAppearances.map((appearance, idx) => (
+                        <span key={appearance.categoryName || idx} style={{ color: '#ccff00' }}>
+                          {appearance.categoryName ? `"${appearance.categoryName}"` : ''}
+                          {idx < cardPackAppearances.length - 1 && <span className="text-gray-400">, </span>}
+                        </span>
+                      ))}
+                      <span className="text-gray-400"> 카드팩 한정</span>
+                    </div>
+                  )}
+                  {(!cardPackAppearances || cardPackAppearances.length === 0) && limitedCategoryName && (
+                    <div className="text-sm mt-1" style={{ color: '#ccff00' }}>
+                      "{limitedCategoryName}" 카드팩 한정
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3 mt-1 text-base">
+                    {keywordId && keywordId !== "0" && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-yellow-400 font-medium">{keywordName}</span>
+                      </div>
+                    )}
+                    {cost && (
+                      <div className="flex items-center gap-1">
+                        <img src="/images/keyword/cost.webp" alt="cost" className="w-4 h-4 object-contain" />
+                        <span className="text-yellow-400">{cost}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400 mt-1">
+                    <div className="flex items-center gap-1">
+                      <span>강화</span>
+                      {enhanceYn === "Y" ? (
+                        <span className="text-green-400">가능</span>
+                      ) : (
+                        <span className="text-red-400">불가</span>
+                      )}
+                    </div>
+                    {grades && grades.length > 0 && (
+                      <div className="flex items-center gap-1 text-xs flex-wrap">
+                        {grades.includes("N") && (
+                          <span className="px-2 py-0.5 rounded bg-green-900/40 border border-green-500/60 text-green-200">노말</span>
+                        )}
+                        {grades.includes("H") && (
+                          <span className="px-2 py-0.5 rounded bg-pink-900/40 border border-pink-500/60 text-pink-200">하드</span>
+                        )}
+                        {grades.includes("E") && (
+                          <span className="px-2 py-0.5 rounded bg-red-900/40 border border-red-500/60 text-red-200">익스트림</span>
+                        )}
+                        {synthesisYn === "Y" && (
+                          <span className="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-500/60 text-purple-200">합성전용</span>
+                        )}
+                      </div>
+                    )}
+                    {(!grades || grades.length === 0) && synthesisYn === "Y" && (
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-500/60 text-purple-200">합성전용</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </td>
+              {/* 해시태그 영역 - 한 줄에 2개 이상 들어가도록 최소 너비 확보 */}
+              <td className="align-top min-w-[320px] w-[320px] pl-4 pb-4 md:pb-0 border-l border-[#b8860b]/30">
+                {selectedTagIds.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    {hashtags
+                      .filter((tag) => selectedTagIds.includes(tag.tagId))
+                      .map((tag) => (
+                        <span
+                          key={tag.tagId}
+                          className="px-2 py-1 text-xs rounded-full bg-[#222]/80 border border-[#b8860b]/40 text-[#f0e68c] whitespace-nowrap"
+                        >
+                          #{tag.tagName}
+                        </span>
+                      ))}
+                  </div>
+                ) : (
+                  <span className="text-transparent select-none">-</span>
                 )}
-              </div>
-            </div>
-          </div>
-
-          {/* 오른쪽: 해시태그 */}
-          {selectedTagIds.length > 0 && (
-            <div className="flex flex-wrap gap-2 justify-start md:justify-end items-start p-2 border-t md:border-t-0 md:border-l border-[#b8860b]/30 h-fit -mb-4 md:mb-0">
-              {hashtags
-                .filter((tag) => selectedTagIds.includes(tag.tagId))
-                .map((tag) => (
-                  <span
-                    key={tag.tagId}
-                    className="px-2 py-1 text-xs rounded-full bg-[#222]/80 border border-[#b8860b]/40 text-[#f0e68c] whitespace-nowrap"
-                  >
-                    #{tag.tagName}
-                  </span>
-                ))}
-            </div>
-          )}
-        </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
         {/* 상세 정보 */}
         <div className="mt-6 border-t border-[#b8860b]/30 pt-4">

@@ -59,6 +59,7 @@ interface BodyPart {
   };
   staggerRanges: string[];
   skills: Skill[];
+  passives?: Passive[];  // 부위별 패시브
 }
 
 interface Passive {
@@ -622,7 +623,10 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
                           <div className="space-y-3">
                           {part.skills.map((skill) => {
                             const isExpanded = !collapsedSkillIds.has(skill.skillId);
-                            const hasDetail = skill.description || (skill.coins && skill.coins.length > 0);
+                            const visibleCoins = (skill.coins || []).filter(
+                              (coin) => coin.description && coin.description.trim() !== ""
+                            );
+                            const hasDetail = skill.description || visibleCoins.length > 0;
                             return (
                             <div key={skill.skillId} className="border border-[#b8860b]/30 rounded p-3 bg-[#0f0f0f]">
                               <div className="flex gap-3 items-start mb-2">
@@ -685,9 +689,10 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
                                         <span className="text-[#ededed]">
                                           {skill.attackLevel || "-"}
                                           {(() => {
-                                            const n = parseFloat(skill.growthCoefficient ?? "");
-                                            if (!isNaN(n) && n !== 0) {
-                                              return ` (${n > 0 ? `+${n}` : `${n}`})`;
+                                            const growth = parseFloat(skill.growthCoefficient ?? "");
+                                            if (!isNaN(growth) && growth !== 0) {
+                                              const sign = growth > 0 ? "+" : "";
+                                              return ` ( 적 레벨 ${sign}${growth} )`;
                                             }
                                             return "";
                                           })()}
@@ -720,23 +725,26 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
                                         </div>
                                       </div>
                                     )}
-                                    {skill.coins && skill.coins.length > 0 && (
+                                    {visibleCoins.length > 0 && (
                                       <div className="mt-2 space-y-1">
                                         <div className="text-[#8a8580] text-xs font-medium">코인별 효과</div>
-                                        {skill.coins.map((coin, coinIndex) => (
-                                          <div key={coin.coinId} className="pl-3 border-l-2 border-[#b8860b]/30">
-                                            <div className="flex items-start gap-2">
-                                              <img
-                                                src={`/images/enemy/CoinEffect${coinIndex + 1}.webp`}
-                                                alt={`코인 ${coinIndex + 1}`}
-                                                className="w-6 h-6 object-contain flex-shrink-0"
-                                              />
-                                              <div className="text-[#ededed] text-xs whitespace-pre-line">
-                                                <KeywordHighlight text={coin.description} keywords={allKeywords} />
+                                        {skill.coins!.map((coin, coinIndex) => {
+                                          if (!coin.description || !coin.description.trim()) return null;
+                                          return (
+                                            <div key={coin.coinId} className="pl-3 border-l-2 border-[#b8860b]/30">
+                                              <div className="flex items-start gap-2">
+                                                <img
+                                                  src={`/images/enemy/CoinEffect${coinIndex + 1}.webp`}
+                                                  alt={`코인 ${coinIndex + 1}`}
+                                                  className="w-6 h-6 object-contain flex-shrink-0"
+                                                />
+                                                <div className="text-[#ededed] text-xs whitespace-pre-line">
+                                                  <KeywordHighlight text={coin.description} keywords={allKeywords} />
+                                                </div>
                                               </div>
                                             </div>
-                                          </div>
-                                        ))}
+                                          );
+                                        })}
                                       </div>
                                     )}
                                   </div>
@@ -746,6 +754,27 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
                             );
                           })}
                         </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 부위별 패시브 */}
+                    {part.passives && part.passives.length > 0 && (
+                      <div
+                        className={`grid transition-[grid-template-rows] duration-300 ease-in-out overflow-hidden mt-4 ${isBodyPartExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
+                      >
+                        <div className="min-h-0 overflow-hidden">
+                          <h5 className="text-[#b8a88a] text-base font-medium mb-2">패시브</h5>
+                          <div className="space-y-3">
+                            {part.passives.map((passive) => (
+                              <div key={passive.passiveId} className="border border-[#34d399]/40 rounded p-3 bg-[#0f0f0f]">
+                                <h4 className="text-[#b8a88a] text-sm font-medium mb-2">{passive.title}</h4>
+                                <div className="text-[#ededed] text-xs whitespace-pre-line">
+                                  <KeywordHighlight text={passive.content || ""} keywords={allKeywords} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -811,7 +840,10 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
               <div className="space-y-4">
                 {enemyData.skills.map((skill) => {
                   const isExpanded = !collapsedSkillIds.has(skill.skillId);
-                  const hasDetail = skill.description || (skill.coins && skill.coins.length > 0);
+                  const visibleCoins = (skill.coins || []).filter(
+                    (coin) => coin.description && coin.description.trim() !== ""
+                  );
+                  const hasDetail = skill.description || visibleCoins.length > 0;
                   return (
                   <div key={skill.skillId} className="border border-[#b8860b]/40 rounded p-4 bg-[#1a1a1f] hover:bg-[#1b1b1f] transition-colors">
                     <div className="flex gap-4 items-start mb-3">
@@ -874,9 +906,10 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
                               <span className="text-[#ededed]">
                                 {skill.attackLevel || "-"}
                                 {(() => {
-                                  const n = parseFloat(skill.growthCoefficient ?? "");
-                                  if (!isNaN(n) && n !== 0) {
-                                    return ` (${n > 0 ? `+${n}` : `${n}`})`;
+                                  const growth = parseFloat(skill.growthCoefficient ?? "");
+                                  if (!isNaN(growth) && growth !== 0) {
+                                    const sign = growth > 0 ? "+" : "";
+                                    return ` ( 적 레벨 ${sign}${growth} )`;
                                   }
                                   return "";
                                 })()}
@@ -909,23 +942,26 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
                               </div>
                             </div>
                           )}
-                          {skill.coins && skill.coins.length > 0 && (
+                          {visibleCoins.length > 0 && (
                             <div className="mt-3 space-y-2">
                               <div className="text-[#8a8580] text-sm font-medium">코인별 효과</div>
-                              {skill.coins.map((coin, coinIndex) => (
-                                <div key={coin.coinId} className="pl-4 border-l-2 border-[#b8860b]/40">
-                                  <div className="flex items-start gap-2 mb-1">
-                                    <img
-                                      src={`/images/enemy/CoinEffect${coinIndex + 1}.webp`}
-                                      alt={`코인 ${coinIndex + 1}`}
-                                      className="w-7 h-7 object-contain flex-shrink-0"
-                                    />
-                                    <div className="text-[#ededed] text-sm whitespace-pre-line">
-                                      <KeywordHighlight text={coin.description} keywords={allKeywords} />
+                              {skill.coins!.map((coin, coinIndex) => {
+                                if (!coin.description || !coin.description.trim()) return null;
+                                return (
+                                  <div key={coin.coinId} className="pl-4 border-l-2 border-[#b8860b]/40">
+                                    <div className="flex items-start gap-2 mb-1">
+                                      <img
+                                        src={`/images/enemy/CoinEffect${coinIndex + 1}.webp`}
+                                        alt={`코인 ${coinIndex + 1}`}
+                                        className="w-7 h-7 object-contain flex-shrink-0"
+                                      />
+                                      <div className="text-[#ededed] text-sm whitespace-pre-line">
+                                        <KeywordHighlight text={coin.description} keywords={allKeywords} />
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>

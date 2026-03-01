@@ -21,6 +21,8 @@ interface EgoGift {
   enhanceYn: string;
   grades?: string[];
   tagIds?: number[];
+  synthesisYn?: string;
+  limitedCategoryNames?: string[];
 }
 
 interface EgoGiftDetail {
@@ -73,7 +75,180 @@ interface EgoGiftDetail {
   }>;
 }
 
-export default function EgoGiftPage() {
+export interface EgoGiftPageContentProps {
+  /** 즐겨찾기 페이지 등에서 검색 조건 위에 붙일 노드 (예: 즐겨찾기 등록 영역) */
+  slotAboveSearch?: React.ReactNode;
+  /** true면 container/relative z-10 없이 flex+모달만 렌더 (다른 페이지에 삽입 시) */
+  embedded?: boolean;
+  /** 즐겨찾기용: 선택된 에고기프트 ID 목록 (별 채움 표시) */
+  starredEgoGiftIds?: number[];
+  /** 즐겨찾기용: 별 클릭 시 호출 (egogiftId) */
+  onStarClick?: (egogiftId: number) => void;
+  /** 즐겨찾기 결과 탭에서 에고기프트 클릭 시 상세 모달 열기용 (giftName 전달) */
+  openEgoGiftPreviewRef?: React.MutableRefObject<((giftName: string) => void) | null>;
+}
+
+/** 해시태그 드롭다운 패널 내용 (인라인/포탈 공용) */
+function HashtagDropdownPanel({
+  contentRef,
+  groupedHashtags,
+  selectedHashtagIds,
+  setSelectedHashtagIds,
+  tagOperator,
+  setTagOperator,
+  egogiftFilters,
+  egogiftSearchText,
+  setEgoGiftFilters,
+  getCategoryDisplayName,
+}: {
+  contentRef: React.RefObject<HTMLDivElement | null>;
+  groupedHashtags: Record<string, Array<{ tagId: number; tagName: string; tagCategoryCd?: string }>>;
+  selectedHashtagIds: number[];
+  setSelectedHashtagIds: React.Dispatch<React.SetStateAction<number[]>>;
+  tagOperator: "OR" | "AND";
+  setTagOperator: React.Dispatch<React.SetStateAction<"OR" | "AND">>;
+  egogiftFilters: { giftName: string; keywordName: string };
+  egogiftSearchText: string;
+  setEgoGiftFilters: React.Dispatch<React.SetStateAction<{ giftName: string; keywordName: string }>>;
+  getCategoryDisplayName: (code: string) => string;
+}) {
+  return (
+    <div
+      ref={contentRef}
+      className="p-3 bg-[#2a2a2d] border border-[#b8860b]/40 rounded overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] shadow-lg max-h-[500px] md:max-h-[700px]"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-end gap-2 mb-3 text-xs">
+        <span className="text-gray-400">태그 조건</span>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="radio"
+            className="w-3 h-3"
+            checked={tagOperator === "OR"}
+            onChange={() => setTagOperator("OR")}
+          />
+          <span className="text-gray-300">OR</span>
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="radio"
+            className="w-3 h-3"
+            checked={tagOperator === "AND"}
+            onChange={() => setTagOperator("AND")}
+          />
+          <span className="text-gray-300">AND</span>
+        </label>
+      </div>
+
+      <div className="space-y-3">
+        {HASHTAG_CATEGORIES.map((category) => {
+          const categoryCode = category.code;
+          const tags = groupedHashtags[categoryCode] || [];
+          if (!tags || tags.length === 0) return null;
+          const displayName = getCategoryDisplayName(categoryCode);
+          const allSelected = tags.every((tag) => selectedHashtagIds.includes(tag.tagId));
+
+          return (
+            <div key={categoryCode}>
+              <button
+                onClick={() => {
+                  const tagIds = tags.map((t) => t.tagId);
+                  if (allSelected) {
+                    setSelectedHashtagIds((prev) => prev.filter((id) => !tagIds.includes(id)));
+                  } else {
+                    setSelectedHashtagIds((prev) => {
+                      const newIds = [...prev];
+                      tagIds.forEach((tagId) => {
+                        if (!newIds.includes(tagId)) newIds.push(tagId);
+                      });
+                      return newIds;
+                    });
+                  }
+                  setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
+                }}
+                className="text-xs text-yellow-400 mb-1.5 font-semibold hover:text-yellow-300 cursor-pointer transition-colors"
+              >
+                {displayName}
+              </button>
+              <div className="flex flex-wrap gap-2">
+                {tags.map((tag) => (
+                  <button
+                    key={tag.tagId}
+                    onClick={() => {
+                      const newIds = selectedHashtagIds.includes(tag.tagId)
+                        ? selectedHashtagIds.filter((id) => id !== tag.tagId)
+                        : [...selectedHashtagIds, tag.tagId];
+                      setSelectedHashtagIds(newIds);
+                      setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
+                    }}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      selectedHashtagIds.includes(tag.tagId)
+                        ? "bg-yellow-400 text-black font-semibold"
+                        : "bg-[#242427] text-gray-300 hover:bg-[#2a2a2d]"
+                    }`}
+                  >
+                    {tag.tagName}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {groupedHashtags["기타"] && groupedHashtags["기타"].length > 0 && (() => {
+          const tags = groupedHashtags["기타"];
+          const allSelected = tags.every((t) => selectedHashtagIds.includes(t.tagId));
+          return (
+            <div>
+              <button
+                onClick={() => {
+                  const tagIds = tags.map((t) => t.tagId);
+                  if (allSelected) {
+                    setSelectedHashtagIds((prev) => prev.filter((id) => !tagIds.includes(id)));
+                  } else {
+                    setSelectedHashtagIds((prev) => {
+                      const newIds = [...prev];
+                      tagIds.forEach((tagId) => {
+                        if (!newIds.includes(tagId)) newIds.push(tagId);
+                      });
+                      return newIds;
+                    });
+                  }
+                  setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
+                }}
+                className="text-xs text-yellow-400 mb-1.5 font-semibold hover:text-yellow-300 cursor-pointer transition-colors"
+              >
+                기타
+              </button>
+              <div className="flex flex-wrap gap-2">
+                {tags.map((tag) => (
+                  <button
+                    key={tag.tagId}
+                    onClick={() => {
+                      const newIds = selectedHashtagIds.includes(tag.tagId)
+                        ? selectedHashtagIds.filter((id) => id !== tag.tagId)
+                        : [...selectedHashtagIds, tag.tagId];
+                      setSelectedHashtagIds(newIds);
+                      setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
+                    }}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      selectedHashtagIds.includes(tag.tagId)
+                        ? "bg-yellow-400 text-black font-semibold"
+                        : "bg-[#242427] text-gray-300 hover:bg-[#2a2a2d]"
+                    }`}
+                  >
+                    {tag.tagName}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftIds = [], onStarClick, openEgoGiftPreviewRef }: EgoGiftPageContentProps) {
   // 에고기프트 관련 상태
   const [allEgoGiftsFull, setAllEgoGiftsFull] = useState<EgoGift[]>([]);  // 전체 목록 (필터링 전)
   const [egogifts, setEgoGifts] = useState<EgoGift[]>([]);  // 필터링된 목록
@@ -93,6 +268,7 @@ export default function EgoGiftPage() {
   const [allKeywords, setAllKeywords] = useState<any[]>([]);
   const [allHashtags, setAllHashtags] = useState<Array<{ tagId: number; tagName: string; tagCategoryCd?: string }>>([]);
   const [hashtagsOpen, setHashtagsOpen] = useState(false);
+  const [hashtagDropdownPosition, setHashtagDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const hashtagDropdownRef = useRef<HTMLDivElement>(null);
   const hashtagDropdownContentRef = useRef<HTMLDivElement>(null);
   const searchConditionsRef = useRef<HTMLDivElement>(null);
@@ -199,46 +375,53 @@ export default function EgoGiftPage() {
   }, [hashtagsOpen]);
 
   // 해시태그 드롭다운 위치 조정
+  // embedded일 때: body에 포탈해 위치 state로 배치. 아닐 때: in-place에서 fixed + style로 배치
   useEffect(() => {
-    if (hashtagsOpen && searchConditionsRef.current && hashtagDropdownRef.current) {
-      const updateLayout = () => {
-        if (searchConditionsRef.current && hashtagDropdownRef.current) {
-          const isMobile = window.innerWidth < 768; // md breakpoint
-          const searchConditionsRect = searchConditionsRef.current.getBoundingClientRect();
-          const dropdownButtonRect = hashtagDropdownRef.current.getBoundingClientRect();
-          
-          // 드롭다운 컨테이너 찾기
-          const dropdownContainer = hashtagDropdownRef.current.querySelector('[data-dropdown-container]') as HTMLElement;
-          if (dropdownContainer) {
-            if (isMobile) {
-              // 모바일: 해시태그 버튼 바로 아래에 표시
-              const button = hashtagDropdownRef.current.querySelector('button') as HTMLElement;
-              if (button) {
-                const buttonHeight = button.offsetHeight;
-                dropdownContainer.style.top = `${buttonHeight}px`;
-                dropdownContainer.style.marginTop = '0';
-              }
-            } else {
-              // 데스크톱: 검색조건 컨테이너 상단에 맞추기 위해 음수 top 값 설정
-              const offsetFromTop = dropdownButtonRect.top - searchConditionsRect.top;
-              dropdownContainer.style.top = `-${offsetFromTop}px`;
-            }
-            // z-index를 확실히 설정
-            dropdownContainer.style.zIndex = '10001';
-          }
-        }
-      };
-      
-      updateLayout();
-      window.addEventListener('resize', updateLayout);
-      window.addEventListener('scroll', updateLayout);
-      
-      return () => {
-        window.removeEventListener('resize', updateLayout);
-        window.removeEventListener('scroll', updateLayout);
-      };
+    if (!hashtagsOpen || !hashtagDropdownRef.current) {
+      if (!hashtagsOpen) setHashtagDropdownPosition(null);
+      return;
     }
-  }, [hashtagsOpen]);
+    const updateLayout = () => {
+      if (!hashtagDropdownRef.current) return;
+      const buttonRect = hashtagDropdownRef.current.getBoundingClientRect();
+      const isMobile = window.innerWidth < 768;
+      const width = isMobile ? Math.min(400, window.innerWidth - buttonRect.left - 16) : 400;
+      let left: number;
+      let top: number;
+      if (isMobile) {
+        left = buttonRect.left;
+        top = buttonRect.bottom + 4;
+      } else {
+        const gap = 8;
+        left = buttonRect.right + gap;
+        if (left + width > window.innerWidth) left = window.innerWidth - width - 8;
+        if (left < 8) left = 8;
+        top = buttonRect.top;
+      }
+      if (embedded) {
+        // 검색조건과 같은 높이에서 패널 시작: 검색조건 컨테이너 상단에 맞춤
+        const searchRect = searchConditionsRef.current?.getBoundingClientRect();
+        const panelTop = searchRect ? searchRect.top : top;
+        setHashtagDropdownPosition({ top: panelTop, left, width });
+      } else {
+        const dropdownContainer = hashtagDropdownRef.current.querySelector('[data-dropdown-container]') as HTMLElement;
+        if (dropdownContainer) {
+          dropdownContainer.style.position = 'fixed';
+          dropdownContainer.style.zIndex = '10001';
+          dropdownContainer.style.left = `${left}px`;
+          dropdownContainer.style.top = `${top}px`;
+          dropdownContainer.style.width = `${width}px`;
+        }
+      }
+    };
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+    window.addEventListener('scroll', updateLayout, true);
+    return () => {
+      window.removeEventListener('resize', updateLayout);
+      window.removeEventListener('scroll', updateLayout, true);
+    };
+  }, [hashtagsOpen, embedded]);
 
   // 전체 에고기프트 목록 한 번에 불러오기 (초기 로드 시)
   const fetchAllEgoGiftsFull = async () => {
@@ -266,6 +449,8 @@ export default function EgoGiftPage() {
           enhanceYn: item.enhanceYn || "",
           grades: item.grades || [],
           tagIds: item.tagIds || [],
+          synthesisYn: item.synthesisYn ?? item.synthesis_yn,
+          limitedCategoryNames: Array.isArray(item.limitedCategoryNames) ? item.limitedCategoryNames : [],
         }));
         setAllEgoGiftsFull(items);
       }
@@ -334,7 +519,43 @@ export default function EgoGiftPage() {
       });
     }
 
-    return filtered;
+    // 정렬: 키워드별 순서 → 등급(높은 등급 우선) → 출현난이도(노말→하드→익스트림)
+    const KEYWORD_ORDER = [
+      "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격", "범용", "기타",
+    ];
+    const keywordOrder = (name: string | undefined) => {
+      if (!name) return KEYWORD_ORDER.length;
+      const i = KEYWORD_ORDER.indexOf(name.trim());
+      return i >= 0 ? i : KEYWORD_ORDER.length;
+    };
+    const tierOrder = (tier: string | undefined) => {
+      if (!tier) return 99;
+      const t = String(tier).trim().toUpperCase();
+      if (t === "1") return 1;
+      if (t === "2") return 2;
+      if (t === "3") return 3;
+      if (t === "4") return 4;
+      if (t === "5") return 5;
+      if (t === "EX") return 6;
+      return 99;
+    };
+    const gradeOrder = (grades: string[] | undefined) => {
+      if (!grades || grades.length === 0) return 99;
+      let min = 99;
+      for (const g of grades) {
+        if (g === "N") min = Math.min(min, 1);
+        else if (g === "H") min = Math.min(min, 2);
+        else if (g === "E") min = Math.min(min, 3);
+      }
+      return min;
+    };
+    return [...filtered].sort((a, b) => {
+      const kw = keywordOrder(a.keywordName) - keywordOrder(b.keywordName);
+      if (kw !== 0) return kw;
+      const d = tierOrder(b.giftTier) - tierOrder(a.giftTier);
+      if (d !== 0) return d;
+      return gradeOrder(a.grades) - gradeOrder(b.grades);
+    });
   }, [
     allEgoGiftsFull,
     egogiftFilters.giftName,
@@ -350,6 +571,28 @@ export default function EgoGiftPage() {
   // 필터링된 결과를 상태에 반영
   useEffect(() => {
     setEgoGifts(filteredEgoGifts);
+  }, [filteredEgoGifts]);
+
+  // 합성전용 에고기프트의 합성재료 목록 배치 조회
+  const [synthesisMaterialsMap, setSynthesisMaterialsMap] = useState<Record<number, string[]>>({});
+  useEffect(() => {
+    const synthesisIds = filteredEgoGifts.filter((eg) => eg.synthesisYn === "Y").map((eg) => eg.egogiftId);
+    if (synthesisIds.length === 0) {
+      setSynthesisMaterialsMap({});
+      return;
+    }
+    const q = synthesisIds.map((id) => "egogiftIds=" + id).join("&");
+    fetch(`${API_BASE_URL}/user/egogift/synthesis-materials?${q}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: Record<string, string[]>) => {
+        const next: Record<number, string[]> = {};
+        Object.keys(data).forEach((k) => {
+          const id = Number(k);
+          if (Array.isArray(data[k])) next[id] = data[k];
+        });
+        setSynthesisMaterialsMap(next);
+      })
+      .catch(() => setSynthesisMaterialsMap({}));
   }, [filteredEgoGifts]);
 
   // 초기 로드 시 전체 목록 불러오기
@@ -757,34 +1000,31 @@ export default function EgoGiftPage() {
     setEgoGiftRecipe(null);
   };
 
+  // 즐겨찾기 결과 탭에서 에고기프트 클릭 시 이 함수로 상세 모달 열기
+  useEffect(() => {
+    if (openEgoGiftPreviewRef) {
+      openEgoGiftPreviewRef.current = handleEgoGiftClick;
+      return () => {
+        openEgoGiftPreviewRef.current = null;
+      };
+    }
+  }, [openEgoGiftPreviewRef, handleEgoGiftClick]);
+
   const baseUrl = API_BASE_URL.replace("/api", "");
 
 
-  return (
-    <div 
-      className="min-h-screen text-white relative"
-      style={{
-        backgroundImage: "url('/Yihongyuan_Yard_BG.webp')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-        backgroundAttachment: "fixed"
-      }}
-    >
-      <div className="absolute inset-0 bg-black/60 z-0"></div>
-      
-      <div className="relative z-10">
-        <div className="container mx-auto px-4 py-8">
-          <div className="flex flex-col md:flex-row gap-6">
-            {/* 검색 조건 */}
-            <div className="w-full md:w-[285px] flex-shrink-0 order-1 md:order-1">
-              <div ref={searchConditionsRef} className="relative bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:sticky md:top-20 z-[100] overflow-visible" id="search-conditions-container">
+  const flexRow = (
+    <div className="flex flex-col md:flex-row gap-6">
+            {/* 검색 조건 (slotAboveSearch 있으면 그 위에 표시) - embedded일 때 왼쪽 전체 sticky */}
+            <div className={"w-full md:w-[285px] flex-shrink-0 order-1 md:order-1 space-y-4 " + (embedded ? "md:sticky md:top-[120px] md:self-start" : "")}>
+              {slotAboveSearch}
+              <div ref={searchConditionsRef} className={`relative bg-[#131316] border border-[#b8860b]/40 rounded p-4 overflow-visible ${embedded ? "" : "md:sticky md:top-20"} ${hashtagsOpen ? "z-[200]" : "z-[100]"}`} id="search-conditions-container">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-yellow-300">검색 조건</h2>
-                  {/* 모바일에서만 접기/펼치기 버튼 표시 */}
+                  {/* 모바일 또는 embedded일 때 접기/펼치기 버튼 표시 */}
                   <button
                     onClick={() => setSearchConditionsCollapsed(!searchConditionsCollapsed)}
-                    className="md:hidden text-yellow-300 hover:text-yellow-200 transition-colors"
+                    className={(embedded ? "" : "md:hidden") + " text-yellow-300 hover:text-yellow-200 transition-colors"}
                     aria-label={searchConditionsCollapsed ? "검색 조건 펼치기" : "검색 조건 접기"}
                   >
                     <span className={`transition-transform duration-200 ${searchConditionsCollapsed ? "rotate-180" : ""}`}>
@@ -793,9 +1033,10 @@ export default function EgoGiftPage() {
                   </button>
                 </div>
                 
-                {/* 모바일에서 접혀있을 때 선택된 조건 요약 표시 */}
-                {searchConditionsCollapsed && (
-                  <div className="md:hidden space-y-2 text-sm">
+                {/* 접혀있을 때 선택된 조건 요약 (모바일 또는 embedded일 때 표시) - 부드럽게 접기/펼치기 */}
+                <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: searchConditionsCollapsed ? "1fr" : "0fr" }}>
+                  <div className="min-h-0 overflow-hidden">
+                    <div className={(embedded ? "" : "md:hidden") + " space-y-2 text-sm"}>
                     {egogiftSearchText && (
                       <div className="flex items-center gap-2">
                         <span className="text-gray-400">제목:</span>
@@ -896,11 +1137,14 @@ export default function EgoGiftPage() {
                      selectedAttrKeywordIds.length === 0 && selectedGiftTiers.length === 0 && selectedGrades.length === 0 && selectedHashtagIds.length === 0 && (
                       <div className="text-gray-500 text-xs">선택된 조건이 없습니다.</div>
                     )}
+                    </div>
                   </div>
-                )}
+                </div>
                 
-                {/* 모바일에서 접혀있을 때는 내용 숨기기 */}
-                <div className={`md:block ${searchConditionsCollapsed ? "hidden" : "block"}`}>
+                {/* 검색 조건 폼 - 부드럽게 접기/펼치기 */}
+                <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: searchConditionsCollapsed ? "0fr" : "1fr" }}>
+                  <div className="min-h-0 overflow-hidden">
+                <div className={embedded ? "block" : "md:block"}>
                 
                 <div className="flex gap-2 mb-4">
                   <button
@@ -934,9 +1178,10 @@ export default function EgoGiftPage() {
                     className="w-full px-4 py-2 bg-[#2a2a2d] hover:bg-[#3a3a3d] rounded text-sm flex items-center justify-between"
                   >
                     <span>즐겨찾기 ({favorites.length})</span>
-                    <span className={`transition-transform duration-200 ${favoritesOpen ? "rotate-90" : ""}`}>▶</span>
+                    <span className={"transition-transform duration-200 " + (favoritesOpen ? "rotate-90" : "")}>▶</span>
                   </button>
-                  {favoritesOpen && (
+                  <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: favoritesOpen ? "1fr" : "0fr" }}>
+                    <div className="min-h-0 overflow-hidden">
                     <div className="mt-2 space-y-2">
                       {favorites.length === 0 ? (
                         <div className="text-center text-gray-400 text-sm py-4">
@@ -947,9 +1192,9 @@ export default function EgoGiftPage() {
                           const favoriteName = (() => {
                             try {
                               const conditions = JSON.parse(favorite.searchJson);
-                              return conditions.name || `즐겨찾기 (${new Date(favorite.createdAt).toLocaleDateString()})`;
+                              return conditions.name || "즐겨찾기 (" + new Date(favorite.createdAt).toLocaleDateString() + ")";
                             } catch {
-                              return `즐겨찾기 (${new Date(favorite.createdAt).toLocaleDateString()})`;
+                              return "즐겨찾기 (" + new Date(favorite.createdAt).toLocaleDateString() + ")";
                             }
                           })();
 
@@ -1020,40 +1265,28 @@ export default function EgoGiftPage() {
                                   >
                                     {favoriteName}
                                   </button>
-                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                  <div className="flex items-center gap-0.5 flex-shrink-0">
                                     <button
+                                      type="button"
                                       onClick={() => startEditFavorite(favorite.favoriteId, favorite.searchJson)}
-                                      className="bg-blue-600 hover:bg-blue-500 rounded text-xs whitespace-nowrap min-w-[48px] flex items-center justify-center"
-                                      style={{ 
-                                        height: '28px', 
-                                        lineHeight: '28px', 
-                                        padding: '0 0.75rem',
-                                        margin: 0,
-                                        border: 'none',
-                                        boxSizing: 'border-box',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center'
-                                      }}
+                                      className="p-1.5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-300 transition-colors"
+                                      title="제목 수정"
+                                      aria-label="제목 수정"
                                     >
-                                      수정
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                      </svg>
                                     </button>
                                     <button
+                                      type="button"
                                       onClick={() => deleteFavorite(favorite.favoriteId)}
-                                      className="bg-red-600 hover:bg-red-500 rounded text-xs whitespace-nowrap min-w-[48px] flex items-center justify-center"
-                                      style={{ 
-                                        height: '28px', 
-                                        lineHeight: '28px', 
-                                        padding: '0 0.75rem',
-                                        margin: 0,
-                                        border: 'none',
-                                        boxSizing: 'border-box',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center'
-                                      }}
+                                      className="p-1.5 rounded text-red-400 hover:bg-red-400/20 hover:text-red-300 transition-colors"
+                                      title="삭제"
+                                      aria-label="삭제"
                                     >
-                                      삭제
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                                      </svg>
                                     </button>
                                   </div>
                                 </>
@@ -1063,7 +1296,8 @@ export default function EgoGiftPage() {
                         })
                       )}
                     </div>
-                  )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -1246,6 +1480,8 @@ export default function EgoGiftPage() {
                       <span>해시태그</span>
                       <span className={`transition-transform duration-200 ${hashtagsOpen ? "rotate-90" : ""}`}>▶</span>
                     </button>
+                    {/* embedded일 때는 포탈로만 렌더, 아닐 때는 인라인 */}
+                    {!(embedded && hashtagsOpen) && (
                     <div
                       data-dropdown-container
                       className={`absolute transition-all duration-300 ease-in-out ${
@@ -1255,155 +1491,20 @@ export default function EgoGiftPage() {
                       } left-0 w-full md:w-[400px]`}
                       style={{ zIndex: 10001 }}
                     >
-                      <div 
-                        ref={hashtagDropdownContentRef}
-                        className="p-3 bg-[#2a2a2d] border border-[#b8860b]/40 rounded overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] shadow-lg max-h-[500px] md:max-h-[700px]"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="flex items-center justify-end gap-2 mb-3 text-xs">
-                          <span className="text-gray-400">태그 조건</span>
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <input
-                              type="radio"
-                              className="w-3 h-3"
-                              checked={tagOperator === "OR"}
-                              onChange={() => {
-                                setTagOperator("OR");
-                              }}
-                            />
-                            <span className="text-gray-300">OR</span>
-                          </label>
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <input
-                              type="radio"
-                              className="w-3 h-3"
-                              checked={tagOperator === "AND"}
-                              onChange={() => {
-                                setTagOperator("AND");
-                              }}
-                            />
-                            <span className="text-gray-300">AND</span>
-                          </label>
-                        </div>
-
-                        <div className="space-y-3">
-                          {HASHTAG_CATEGORIES.map((category) => {
-                            const categoryCode = category.code;
-                            const tags = groupedHashtags[categoryCode] || [];
-                            if (!tags || tags.length === 0) {
-                              return null;
-                            }
-                            const displayName = getCategoryDisplayName(categoryCode);
-                            // 해당 카테고리의 모든 태그가 선택되어 있는지 확인
-                            const allSelected = tags.every(tag => selectedHashtagIds.includes(tag.tagId));
-                            
-                            return (
-                              <div key={categoryCode}>
-                                <button
-                                  onClick={() => {
-                                    const tagIds = tags.map(tag => tag.tagId);
-                                    if (allSelected) {
-                                      // 모두 선택되어 있으면 모두 해제
-                                      setSelectedHashtagIds(prev => prev.filter(id => !tagIds.includes(id)));
-                                    } else {
-                                      // 하나라도 선택되지 않았으면 모두 선택
-                                      setSelectedHashtagIds(prev => {
-                                        const newIds = [...prev];
-                                        tagIds.forEach(tagId => {
-                                          if (!newIds.includes(tagId)) {
-                                            newIds.push(tagId);
-                                          }
-                                        });
-                                        return newIds;
-                                      });
-                                    }
-                                    setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
-                                  }}
-                                  className="text-xs text-yellow-400 mb-1.5 font-semibold hover:text-yellow-300 cursor-pointer transition-colors"
-                                >
-                                  {displayName}
-                                </button>
-                                <div className="flex flex-wrap gap-2">
-                                  {tags.map((tag) => (
-                                    <button
-                                      key={tag.tagId}
-                                      onClick={() => {
-                                        const newIds = selectedHashtagIds.includes(tag.tagId)
-                                          ? selectedHashtagIds.filter(id => id !== tag.tagId)
-                                          : [...selectedHashtagIds, tag.tagId];
-                                        setSelectedHashtagIds(newIds);
-                                        setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
-                                      }}
-                                      className={`px-2 py-1 text-xs rounded transition-colors ${
-                                        selectedHashtagIds.includes(tag.tagId)
-                                          ? "bg-yellow-400 text-black font-semibold"
-                                          : "bg-[#242427] text-gray-300 hover:bg-[#2a2a2d]"
-                                      }`}
-                                    >
-                                      {tag.tagName}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {groupedHashtags["기타"] && groupedHashtags["기타"].length > 0 && (() => {
-                            const tags = groupedHashtags["기타"];
-                            const allSelected = tags.every(tag => selectedHashtagIds.includes(tag.tagId));
-                            
-                            return (
-                              <div>
-                                <button
-                                  onClick={() => {
-                                    const tagIds = tags.map(tag => tag.tagId);
-                                    if (allSelected) {
-                                      // 모두 선택되어 있으면 모두 해제
-                                      setSelectedHashtagIds(prev => prev.filter(id => !tagIds.includes(id)));
-                                    } else {
-                                      // 하나라도 선택되지 않았으면 모두 선택
-                                      setSelectedHashtagIds(prev => {
-                                        const newIds = [...prev];
-                                        tagIds.forEach(tagId => {
-                                          if (!newIds.includes(tagId)) {
-                                            newIds.push(tagId);
-                                          }
-                                        });
-                                        return newIds;
-                                      });
-                                    }
-                                    setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
-                                  }}
-                                  className="text-xs text-yellow-400 mb-1.5 font-semibold hover:text-yellow-300 cursor-pointer transition-colors"
-                                >
-                                  기타
-                                </button>
-                                <div className="flex flex-wrap gap-2">
-                                  {tags.map((tag) => (
-                                    <button
-                                      key={tag.tagId}
-                                      onClick={() => {
-                                        const newIds = selectedHashtagIds.includes(tag.tagId)
-                                          ? selectedHashtagIds.filter(id => id !== tag.tagId)
-                                          : [...selectedHashtagIds, tag.tagId];
-                                        setSelectedHashtagIds(newIds);
-                                        setEgoGiftFilters({ ...egogiftFilters, giftName: egogiftSearchText });
-                                      }}
-                                      className={`px-2 py-1 text-xs rounded transition-colors ${
-                                        selectedHashtagIds.includes(tag.tagId)
-                                          ? "bg-yellow-400 text-black font-semibold"
-                                          : "bg-[#242427] text-gray-300 hover:bg-[#2a2a2d]"
-                                      }`}
-                                    >
-                                      {tag.tagName}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </div>
+                      <HashtagDropdownPanel
+                        contentRef={hashtagDropdownContentRef}
+                        groupedHashtags={groupedHashtags}
+                        selectedHashtagIds={selectedHashtagIds}
+                        setSelectedHashtagIds={setSelectedHashtagIds}
+                        tagOperator={tagOperator}
+                        setTagOperator={setTagOperator}
+                        egogiftFilters={egogiftFilters}
+                        egogiftSearchText={egogiftSearchText}
+                        setEgoGiftFilters={setEgoGiftFilters}
+                        getCategoryDisplayName={getCategoryDisplayName}
+                      />
                     </div>
+                    )}
                     
                     {/* 선택된 해시태그 표시 */}
                     {selectedHashtagIds.length > 0 && (
@@ -1434,6 +1535,8 @@ export default function EgoGiftPage() {
                   </div>
                 </div>
                 </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1460,7 +1563,7 @@ export default function EgoGiftPage() {
                             setPreviewHashtags(data.tags || []);
                           }
                         }}
-                        className="bg-[#131316] border border-[#b8860b]/40 rounded p-3 cursor-pointer hover:scale-[1.02] hover:ring-2 hover:ring-yellow-400 transition-all duration-200"
+                        className="rounded p-3 cursor-pointer hover:scale-[1.02] hover:ring-2 hover:ring-yellow-400 transition-all duration-200 bg-[#131316] border border-[#b8860b]/40"
                       >
                         <div className="relative aspect-square mb-2">
                           <img
@@ -1469,13 +1572,42 @@ export default function EgoGiftPage() {
                             className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none z-0"
                           />
 
+                          {/* 즐겨찾기 별 (onStarClick 있을 때만 표시) */}
+                          {onStarClick && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onStarClick(egogift.egogiftId);
+                              }}
+                              className="absolute top-1 right-1 z-30 w-16 h-16 md:w-[51px] md:h-[51px] flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition-colors"
+                              title={starredEgoGiftIds.includes(egogift.egogiftId) ? "즐겨찾기 해제" : "즐겨찾기"}
+                            >
+                              <svg
+                                className={`w-10 h-10 md:w-8 md:h-8 ${starredEgoGiftIds.includes(egogift.egogiftId) ? "text-yellow-400 fill-yellow-400" : "text-gray-400 fill-none"}`}
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={1.5}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                              </svg>
+                            </button>
+                          )}
+
                           <div className="absolute top-1 -left-3 z-20 text-[#ffcc33] scale-x-[0.65] text-5xl drop-shadow-[0_0_5px_rgba(0,0,0,0.9)] select-none tracking-tight leading-none font-black">
-                            {egogift.giftTier === "EX" ? "EX" : 
-                             egogift.giftTier === "1" ? "Ⅰ" :
-                             egogift.giftTier === "2" ? "Ⅱ" :
-                             egogift.giftTier === "3" ? "Ⅲ" :
-                             egogift.giftTier === "4" ? "Ⅳ" :
-                             egogift.giftTier === "5" ? "Ⅴ" : egogift.giftTier}
+                            {(() => {
+                              const tier = egogift.giftTier != null ? String(egogift.giftTier).trim() : "";
+                              if (tier === "" || tier === "0") return "－";
+                              if (tier === "EX") return "EX";
+                              if (tier === "1") return "Ⅰ";
+                              if (tier === "2") return "Ⅱ";
+                              if (tier === "3") return "Ⅲ";
+                              if (tier === "4") return "Ⅳ";
+                              if (tier === "5") return "Ⅴ";
+                              return "－";
+                            })()}
                           </div>
 
                           {egogift.keywordId && egogift.keywordId !== 0 && egogift.keywordName && (() => {
@@ -1518,8 +1650,8 @@ export default function EgoGiftPage() {
                             </div>
                           )}
                         </div>
-                        <div className="text-base text-center text-gray-300 truncate font-medium">
-                          {egogift.giftName}
+                        <div className="text-base text-center text-gray-300 font-medium space-y-0.5">
+                          <div className="truncate">{egogift.giftName}</div>
                         </div>
                       </div>
                     ))}
@@ -1538,8 +1670,16 @@ export default function EgoGiftPage() {
               )}
             </div>
           </div>
+  );
+  return (
+    <>
+      {embedded ? flexRow : (
+        <div className="relative z-10">
+          <div className="container mx-auto px-4 py-8">
+            {flexRow}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 에고기프트 미리보기 모달 */}
       {egogiftPreviewOpen && egogiftPreviewData && typeof window !== "undefined" && createPortal(
@@ -1577,6 +1717,51 @@ export default function EgoGiftPage() {
         />,
         document.body
       )}
+
+      {/* embedded일 때 해시태그 드롭다운을 body에 포탈 */}
+      {embedded && hashtagsOpen && hashtagDropdownPosition && typeof window !== "undefined" && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            top: hashtagDropdownPosition.top,
+            left: hashtagDropdownPosition.left,
+            width: hashtagDropdownPosition.width,
+            zIndex: 10001,
+          }}
+        >
+          <HashtagDropdownPanel
+            contentRef={hashtagDropdownContentRef}
+            groupedHashtags={groupedHashtags}
+            selectedHashtagIds={selectedHashtagIds}
+            setSelectedHashtagIds={setSelectedHashtagIds}
+            tagOperator={tagOperator}
+            setTagOperator={setTagOperator}
+            egogiftFilters={egogiftFilters}
+            egogiftSearchText={egogiftSearchText}
+            setEgoGiftFilters={setEgoGiftFilters}
+            getCategoryDisplayName={getCategoryDisplayName}
+          />
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+export default function EgoGiftPage() {
+  return (
+    <div
+      className="min-h-screen text-white relative"
+      style={{
+        backgroundImage: "url('/Yihongyuan_Yard_BG.webp')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundAttachment: "fixed",
+      }}
+    >
+      <div className="absolute inset-0 bg-black/60 z-0" />
+      <EgoGiftPageContent />
     </div>
   );
 }

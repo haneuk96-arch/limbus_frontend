@@ -67,6 +67,12 @@ export default function EnemyEditPage() {
         indestructible: string;
       }>;
     }>;
+    passives: Array<{
+      id: number;
+      title: string;
+      content: string;
+      isExpanded: boolean;
+    }>;
   }>>([]);
   const [allKeywords, setAllKeywords] = useState<KeywordData[]>([]);
   const [passives, setPassives] = useState<Array<{
@@ -208,6 +214,12 @@ export default function EnemyEditPage() {
                 indestructible: coin.indestructible || "N",
               })),
             })),
+            passives: (bp.passives || []).map((p: any, pi: number) => ({
+              id: pi + 1,
+              title: p.title || "",
+              content: p.content || "",
+              isExpanded: true,
+            })),
           }));
           setBodyParts(parts);
         } else {
@@ -318,6 +330,7 @@ export default function EnemyEditPage() {
       staggerRanges: [],
       isExpanded: true,
       skills: [],
+      passives: [],
     }]);
   };
 
@@ -522,6 +535,47 @@ export default function EnemyEditPage() {
     }));
   };
 
+  const addBodyPartPassive = (bodyPartId: number) => {
+    setBodyParts(bodyParts.map(b => {
+      if (b.id !== bodyPartId) return b;
+      const newId = b.passives.length > 0 ? Math.max(...b.passives.map(p => p.id)) + 1 : 1;
+      return {
+        ...b,
+        passives: [...b.passives, { id: newId, title: "", content: "", isExpanded: true }],
+      };
+    }));
+  };
+
+  const toggleBodyPartPassiveExpanded = (bodyPartId: number, passiveId: number) => {
+    setBodyParts(bodyParts.map(b => {
+      if (b.id !== bodyPartId) return b;
+      return {
+        ...b,
+        passives: b.passives.map(p => p.id === passiveId ? { ...p, isExpanded: !p.isExpanded } : p),
+      };
+    }));
+  };
+
+  const removeBodyPartPassive = (bodyPartId: number, passiveId: number) => {
+    setBodyParts(bodyParts.map(b => {
+      if (b.id !== bodyPartId) return b;
+      return {
+        ...b,
+        passives: b.passives.filter(p => p.id !== passiveId),
+      };
+    }));
+  };
+
+  const updateBodyPartPassiveField = (bodyPartId: number, passiveId: number, field: "title" | "content", value: string) => {
+    setBodyParts(bodyParts.map(b => {
+      if (b.id !== bodyPartId) return b;
+      return {
+        ...b,
+        passives: b.passives.map(p => p.id === passiveId ? { ...p, [field]: value } : p),
+      };
+    }));
+  };
+
   const addPassive = () => {
     const newId = passives.length > 0 ? Math.max(...passives.map(p => p.id)) + 1 : 1;
     setPassives([...passives, { id: newId, title: "", content: "", isExpanded: true }]);
@@ -631,6 +685,10 @@ export default function EnemyEditPage() {
               description: coin.description,
               indestructible: coin.indestructible,
             })),
+          })),
+          passives: part.passives.map(p => ({
+            title: p.title,
+            content: p.content,
           })),
         })),
         passives: passives.map(p => ({ title: p.title, content: p.content })),
@@ -1102,6 +1160,64 @@ export default function EnemyEditPage() {
                                         </div>
                                       )}
                                     </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 부위별 패시브 */}
+                      <div className="mt-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <label className="block text-yellow-300 text-sm font-medium">패시브</label>
+                          <button type="button" onClick={() => addBodyPartPassive(part.id)} className="px-3 py-1 bg-yellow-400 hover:bg-yellow-500 text-black text-sm font-semibold rounded">
+                            추가
+                          </button>
+                        </div>
+                        {part.passives.length > 0 && (
+                          <div className="space-y-4">
+                            {part.passives.map((passive) => (
+                              <div key={passive.id} className="border border-red-700 rounded bg-[#1a1a1d]">
+                                <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-[#1f1f22] transition-colors" onClick={() => toggleBodyPartPassiveExpanded(part.id, passive.id)}>
+                                  <h3 className="text-yellow-300 text-sm font-medium">{passive.title || `패시브 ${passive.id}`}</h3>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-gray-400 text-xs">{passive.isExpanded ? "▼" : "▶"}</span>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); removeBodyPartPassive(part.id, passive.id); }} className="px-3 py-1 bg-red-700 hover:bg-red-800 text-white text-sm rounded">
+                                      삭제
+                                    </button>
+                                  </div>
+                                </div>
+                                {passive.isExpanded && (
+                                  <div className="p-4 pt-0 space-y-4">
+                                    <div>
+                                      <label className="block text-yellow-300 text-sm font-medium mb-2">제목</label>
+                                      <input
+                                        type="text"
+                                        value={passive.title}
+                                        onChange={(e) => updateBodyPartPassiveField(part.id, passive.id, "title", e.target.value)}
+                                        className="w-full px-4 py-2 bg-[#1c1c1f] text-white border border-red-700 rounded focus:outline-none focus:border-yellow-400"
+                                        placeholder="패시브 제목을 입력하세요"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-yellow-300 text-sm font-medium mb-2">내용</label>
+                                      <textarea
+                                        value={passive.content}
+                                        onChange={(e) => updateBodyPartPassiveField(part.id, passive.id, "content", e.target.value)}
+                                        className="w-full min-h-[100px] px-4 py-2 bg-[#1c1c1f] text-white border border-red-700 rounded focus:outline-none focus:border-yellow-400"
+                                        placeholder="패시브 내용을 입력하세요. [[키워드명]] 형식으로 키워드를 사용할 수 있습니다."
+                                      />
+                                    </div>
+                                    {passive.content && (
+                                      <div className="p-4 bg-[#131316] border border-red-700/50 rounded">
+                                        <div className="text-yellow-300 text-sm font-medium mb-2">미리보기:</div>
+                                        <div className="text-white text-sm whitespace-pre-line">
+                                          <KeywordHighlight text={passive.content} keywords={allKeywords} />
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>

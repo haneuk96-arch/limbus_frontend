@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/api";
@@ -28,6 +28,7 @@ export default function CardPackCreatePage() {
   const [enemies, setEnemies] = useState<Enemy[]>([]);
   const [selectedEnemyIds, setSelectedEnemyIds] = useState<number[]>([]);
   const [loadingEnemies, setLoadingEnemies] = useState(false);
+  const [enemySearch, setEnemySearch] = useState("");
 
   useEffect(() => {
     fetchEnemies();
@@ -101,6 +102,14 @@ export default function CardPackCreatePage() {
         : [...prev, enemyId]
     );
   };
+
+  const filteredEnemies = useMemo(() => {
+    const keyword = enemySearch.trim().toLowerCase();
+    if (!keyword) return enemies;
+    return enemies.filter((enemy) =>
+      enemy.name.toLowerCase().includes(keyword)
+    );
+  }, [enemies, enemySearch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -345,22 +354,37 @@ export default function CardPackCreatePage() {
               </div>
             ) : (
               <div className="max-h-64 overflow-y-auto p-4 bg-[#1c1c1f] border border-red-700 rounded">
-                <div className="space-y-2">
-                  {enemies.map((enemy) => (
-                    <label
-                      key={enemy.enemyId}
-                      className="flex items-center gap-2 cursor-pointer hover:bg-[#2a2a2d] p-2 rounded"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedEnemyIds.includes(enemy.enemyId)}
-                        onChange={() => handleEnemyToggle(enemy.enemyId)}
-                        className="w-4 h-4 text-yellow-400 bg-[#1c1c1f] border-red-700 rounded focus:ring-yellow-400"
-                      />
-                      <span className="text-white text-sm">{enemy.name}</span>
-                    </label>
-                  ))}
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    value={enemySearch}
+                    onChange={(e) => setEnemySearch(e.target.value)}
+                    placeholder="적 이름으로 검색..."
+                    className="w-full px-3 py-2 bg-[#131316] text-white border border-red-700 rounded text-sm focus:outline-none focus:border-yellow-400"
+                  />
                 </div>
+                {filteredEnemies.length === 0 ? (
+                  <div className="text-gray-400 text-xs">
+                    검색 결과가 없습니다.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredEnemies.map((enemy) => (
+                      <label
+                        key={enemy.enemyId}
+                        className="flex items-center gap-2 cursor-pointer hover:bg-[#2a2a2d] p-2 rounded"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedEnemyIds.includes(enemy.enemyId)}
+                          onChange={() => handleEnemyToggle(enemy.enemyId)}
+                          className="w-4 h-4 text-yellow-400 bg-[#1c1c1f] border-red-700 rounded focus:ring-yellow-400"
+                        />
+                        <span className="text-white text-sm">{enemy.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
                 {selectedEnemyIds.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-red-700/50 text-gray-400 text-xs">
                     선택된 적: {selectedEnemyIds.length}개

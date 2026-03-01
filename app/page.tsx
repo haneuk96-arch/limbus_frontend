@@ -30,7 +30,7 @@ export default function Home() {
         </div>
 
         {/* 카드 그리드 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 max-w-6xl mx-auto">
           {/* 에고기프트 카드 */}
           <Link 
             href="/egogift"
@@ -228,6 +228,51 @@ export default function Home() {
                       strokeLinejoin="round" 
                       strokeWidth={2} 
                       d="M9 5l7 7-7 7" 
+                    />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </Link>
+
+          {/* 던전 보고서 카드 */}
+          <Link
+            href="/favorites"
+            className="group relative overflow-hidden bg-[#131316] border-2 border-amber-600/60 rounded-lg p-8 hover:border-yellow-400/80 transition-all duration-300 hover:shadow-[0_0_30px_rgba(255,204,51,0.3)] hover:scale-105"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative z-10">
+              <div className="flex justify-center mb-6">
+                <div className="w-24 h-24 bg-[#1a1a1a] rounded-full flex items-center justify-center border-2 border-amber-600/60 group-hover:border-yellow-400/80 transition-colors duration-300">
+                  <svg
+                    className="w-16 h-16 text-amber-400 group-hover:text-yellow-400 transition-colors"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+              </div>
+              <h2 className="text-2xl md:text-3xl font-bold text-yellow-300 text-center mb-4 group-hover:text-yellow-400 transition-colors">
+                던전 보고서
+              </h2>
+              <p className="text-gray-300 text-center mb-6 leading-relaxed">
+                저장한 던전 보고서 목록을 확인할 수 있습니다.
+              </p>
+              <div className="flex justify-center">
+                <div className="w-10 h-10 rounded-full bg-yellow-400/20 group-hover:bg-yellow-400/40 flex items-center justify-center transition-all duration-300 group-hover:translate-x-2">
+                  <svg
+                    className="w-6 h-6 text-yellow-300 group-hover:text-yellow-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
                     />
                   </svg>
                 </div>

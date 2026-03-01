@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { API_BASE_URL } from "@/lib/api";
 import EgoGiftPreview from "@/app/dante/(admin)/egogift/components/EgoGiftPreview";
@@ -70,7 +70,26 @@ interface EgoGiftCategory {
   }>;
 }
 
-export default function CardPackPage() {
+export interface CardPackPageContentProps {
+  /** 즐겨찾기 페이지 등에서 검색 조건 위에 붙일 노드 */
+  slotAboveSearch?: React.ReactNode;
+  /** true면 다른 페이지에 삽입 시 레이아웃 조정 */
+  embedded?: boolean;
+  /** 즐겨찾기용: 선택된 카드팩 ID 목록 (별 채움 표시) */
+  starredCardPackIds?: number[];
+  /** 즐겨찾기용: 별 클릭 시 호출 (cardpackId) */
+  onStarClick?: (cardpackId: number) => void;
+  /** 즐겨찾기 결과 탭에서 카드팩 클릭 시 상세 모달 열기용 (cardpackId 전달) */
+  openCardPackDetailRef?: React.MutableRefObject<{ open: (cardpackId: number) => void } | null>;
+}
+
+export function CardPackPageContent({
+  slotAboveSearch,
+  embedded,
+  starredCardPackIds = [],
+  onStarClick,
+  openCardPackDetailRef,
+}: CardPackPageContentProps) {
   const [allCardPacks, setAllCardPacks] = useState<CardPack[]>([]); // 전체 목록 (필터링 전)
   const [loading, setLoading] = useState(false);
   
@@ -692,7 +711,7 @@ export default function CardPackPage() {
     }
   };
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     setIsModalOpen(false);
     setSelectedCardPackId(null);
     setCardPackDetail(null);
@@ -701,7 +720,17 @@ export default function CardPackPage() {
     setUniqueEnemies([]);
     setEgoGiftCategories([]);
     setIsEgoGiftListExpanded(false);
-  };
+  }, []);
+
+  // 즐겨찾기 결과 탭에서 카드팩 클릭 시 상세 모달 열기
+  useEffect(() => {
+    if (openCardPackDetailRef) {
+      openCardPackDetailRef.current = { open: handleCardPackClick };
+      return () => {
+        openCardPackDetailRef.current = null;
+      };
+    }
+  }, [openCardPackDetailRef, handleCardPackClick]);
 
   const handleEnemyClick = async (enemyId: number) => {
     try {
@@ -893,8 +922,9 @@ export default function CardPackPage() {
       <div className="relative z-10">
         <div className="container mx-auto px-4 py-8">
           <div className="flex flex-col lg:flex-row gap-6">
-            {/* 검색 조건 */}
-            <div className="w-full lg:w-72 lg:flex-shrink-0 lg:flex-grow-0 order-1 lg:order-1">
+            {/* 검색 조건 (slotAboveSearch 있으면 그 위에 표시) */}
+            <div className={"w-full lg:w-72 lg:flex-shrink-0 lg:flex-grow-0 order-1 lg:order-1 space-y-4 " + (embedded ? "lg:sticky lg:top-[120px] lg:self-start" : "")}>
+              {slotAboveSearch}
               <div ref={searchConditionsRef} className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 lg:sticky lg:top-20 z-[100] overflow-visible">
                 <h2 className="text-lg font-semibold text-yellow-300 mb-4">검색 조건</h2>
                 
@@ -1204,9 +1234,32 @@ export default function CardPackPage() {
                       cardPack.thumbnail && (
                         <div
                           key={cardPack.cardpackId}
-                          className="cursor-pointer hover:opacity-80 transition-opacity flex justify-center"
+                          className="cursor-pointer hover:opacity-80 transition-opacity flex justify-center relative"
                           onClick={() => handleCardPackClick(cardPack.cardpackId)}
                         >
+                          {/* 즐겨찾기 별 (onStarClick 있을 때만 표시) */}
+                          {onStarClick && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onStarClick(cardPack.cardpackId);
+                              }}
+                              className="absolute top-1 right-1 z-30 w-16 h-16 md:w-[51px] md:h-[51px] flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition-colors"
+                              title={starredCardPackIds.includes(cardPack.cardpackId) ? "즐겨찾기 해제" : "즐겨찾기"}
+                            >
+                              <svg
+                                className={`w-10 h-10 md:w-8 md:h-8 ${starredCardPackIds.includes(cardPack.cardpackId) ? "text-yellow-400 fill-yellow-400" : "text-gray-400 fill-none"}`}
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={1.5}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                              </svg>
+                            </button>
+                          )}
                           <img
                             src={`${baseUrl}${cardPack.thumbnail}`}
                             alt={cardPack.title}
@@ -1741,3 +1794,6 @@ export default function CardPackPage() {
   );
 }
 
+export default function CardPackPage() {
+  return <CardPackPageContent />;
+}
