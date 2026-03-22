@@ -66,6 +66,8 @@ type Props = {
   /** 결과 탭 에고기프트 체크한 ID 목록 (카드팩과 동일한 체크박스 UI) */
   checkedEgoGiftIds: number[];
   onToggleEgoGiftCheck: (egogiftId: number) => void;
+  /** 상세 모드에서만 카드 우측 하단 X로 보고서 즐겨찾기 목록에서 제거 */
+  onRemoveStarredEgoGift: (egogiftId: number) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
   synthesisRef: (el: HTMLDivElement | null) => void;
   onCaptureSection: (keyword: string, isSynthesis: boolean) => void;
@@ -85,6 +87,7 @@ export function ResultKeywordSection({
   resultEgoGifts,
   checkedEgoGiftIds,
   onToggleEgoGiftCheck,
+  onRemoveStarredEgoGift,
   sectionRef,
   synthesisRef,
   onCaptureSection,
@@ -145,24 +148,27 @@ export function ResultKeywordSection({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); onToggleEgoGiftCheck(eg.egogiftId); }}
-                      className={`absolute top-2 right-2 z-20 w-9 h-9 rounded flex items-center justify-center transition-colors shadow-md border-2 border-blue-400 exclude-from-capture ${checkedEgoGiftIds.includes(eg.egogiftId) ? "bg-blue-500 hover:bg-blue-600" : "bg-black/70 hover:bg-black/90"}`}
+                      className={`absolute top-2 right-2 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded flex items-center justify-center transition-colors shadow-md border-2 border-blue-400 exclude-from-capture shrink-0 ${checkedEgoGiftIds.includes(eg.egogiftId) ? "bg-blue-500 hover:bg-blue-600" : "bg-black/70 hover:bg-black/90"}`}
                       title={checkedEgoGiftIds.includes(eg.egogiftId) ? "체크 해제" : "체크"}
                       aria-label={checkedEgoGiftIds.includes(eg.egogiftId) ? "체크 해제" : "체크"}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-5 h-5 ${checkedEgoGiftIds.includes(eg.egogiftId) ? "text-white" : "text-gray-600"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-4 h-4 sm:w-5 sm:h-5 ${checkedEgoGiftIds.includes(eg.egogiftId) ? "text-white" : "text-gray-600"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     </button>
-                    <div className="flex items-baseline gap-1.5 flex-wrap">
-                      <span className="result-egogift-tier text-amber-400/90 font-bold text-sm shrink-0">{tierDisplay(eg.giftTier)}</span>
-                      <span className="result-egogift-name text-gray-200 font-medium text-sm break-words leading-tight">{eg.giftName}</span>
-                    </div>
-                    {eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0 && (
-                      <div className="text-gray-400 text-xs break-words leading-tight">
-                        {eg.limitedCategoryNames.map((n) => `"${n}"`).join(", ")}
+                    {/* 간소화: 우측 상단 고정 체크와 겹치지 않도록 텍스트만 패딩 (제목·한정 카드팩 문구) */}
+                    <div className="min-w-0 pr-10 sm:pr-11 flex flex-col gap-1">
+                      <div className="flex items-baseline gap-1.5 flex-wrap">
+                        <span className="result-egogift-tier text-amber-400/90 font-bold text-sm shrink-0">{tierDisplay(eg.giftTier)}</span>
+                        <span className="result-egogift-name text-gray-200 font-medium text-sm break-words leading-tight">{eg.giftName}</span>
                       </div>
-                    )}
-                    {eg.synthesisYn === "Y" && <div className="text-purple-300 text-xs">합성전용</div>}
+                      {eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0 && (
+                        <div className="text-gray-400 text-xs break-words leading-tight">
+                          {eg.limitedCategoryNames.map((n) => `"${n}"`).join(", ")}
+                        </div>
+                      )}
+                      {eg.synthesisYn === "Y" && <div className="text-purple-300 text-xs">합성전용</div>}
+                    </div>
                   </div>
                 );
               }
@@ -234,6 +240,21 @@ export function ResultKeywordSection({
                       </div>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onRemoveStarredEgoGift(eg.egogiftId);
+                    }}
+                    className="absolute bottom-2 right-2 z-30 w-8 h-8 rounded-md flex items-center justify-center transition-colors shadow-md border border-red-500/70 bg-red-950/90 hover:bg-red-900 hover:border-red-400 text-red-400 hover:text-red-300 exclude-from-capture"
+                    title="이 에고기프트를 보고서 즐겨찾기에서 제거"
+                    aria-label="이 에고기프트를 보고서 즐겨찾기에서 제거"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
                 </div>
               );
             })}

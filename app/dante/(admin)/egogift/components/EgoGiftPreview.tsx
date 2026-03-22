@@ -5,6 +5,7 @@ import { Montserrat } from "next/font/google";
 import KeywordHighlight from "@/components/KeywordHighlight";
 import { KeywordData } from "@/lib/keywordParser";
 import { API_BASE_URL } from "@/lib/api";
+import { normalizeCurseBlessCd } from "@/lib/egogiftCurseBless";
 
 const montserrat = Montserrat({ 
   subsets: ["latin"], 
@@ -65,6 +66,8 @@ interface EgoGiftPreviewProps {
   cost: string;
   enhanceYn: string;
   synthesisYn?: string;  // 합성전용 여부
+  /** 저주/축복: CURSE | BLESS | null(미선택) */
+  curseBlessCd?: string | null;
   grades?: string[]; // 출현난이도: 'N', 'H', 'E'
   desc1: string;
   desc2: string;
@@ -97,6 +100,7 @@ export default function EgoGiftPreview({
   cost,
   enhanceYn,
   synthesisYn,
+  curseBlessCd = null,
   grades = [],
   desc1,
   desc2,
@@ -116,6 +120,8 @@ export default function EgoGiftPreview({
   onEdit,
   onEgoGiftClick,
 }: EgoGiftPreviewProps) {
+  const resolvedCurseBless = normalizeCurseBlessCd(curseBlessCd);
+
   // ESC 키로 모달 닫기
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -171,6 +177,15 @@ export default function EgoGiftPreview({
   const romanMap: Record<string, string> = { "1": "Ⅰ", "2": "Ⅱ", "3": "Ⅲ", "4": "Ⅳ", "5": "Ⅴ" };
   const displayGrade = giftTier === "EX" ? "EX" : romanMap[giftTier || "1"] || "-";
   const isEX = giftTier === "EX";
+
+  const filteredHashtagTags = hashtags.filter((tag) => selectedTagIds.includes(tag.tagId));
+  const hashtagChipClass =
+    "px-2 py-1 text-xs rounded-full bg-[#222]/80 border border-[#b8860b]/40 text-[#f0e68c] whitespace-nowrap";
+  const hashtagList = filteredHashtagTags.map((tag) => (
+    <span key={tag.tagId} className={hashtagChipClass}>
+      #{tag.tagName}
+    </span>
+  ));
   
   // 조합식 데이터는 각 조합식마다 개별적으로 처리
 
@@ -287,8 +302,9 @@ export default function EgoGiftPreview({
                       </div>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400 mt-1">
-                    <div className="flex items-center gap-1">
+                  {/* 강화 → 오른쪽에 출현 난이도 · 합성전용 · 저주/축복 (한 줄 flex) */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-400 mt-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <span>강화</span>
                       {enhanceYn === "Y" ? (
                         <span className="text-green-400">가능</span>
@@ -296,45 +312,43 @@ export default function EgoGiftPreview({
                         <span className="text-red-400">불가</span>
                       )}
                     </div>
-                    {grades && grades.length > 0 && (
-                      <div className="flex items-center gap-1 text-xs flex-wrap">
-                        {grades.includes("N") && (
-                          <span className="px-2 py-0.5 rounded bg-green-900/40 border border-green-500/60 text-green-200">노말</span>
-                        )}
-                        {grades.includes("H") && (
-                          <span className="px-2 py-0.5 rounded bg-pink-900/40 border border-pink-500/60 text-pink-200">하드</span>
-                        )}
-                        {grades.includes("E") && (
-                          <span className="px-2 py-0.5 rounded bg-red-900/40 border border-red-500/60 text-red-200">익스트림</span>
-                        )}
-                        {synthesisYn === "Y" && (
-                          <span className="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-500/60 text-purple-200">합성전용</span>
-                        )}
-                      </div>
+                    {grades?.includes("N") && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-green-900/40 border border-green-500/60 text-green-200">
+                        노말
+                      </span>
                     )}
-                    {(!grades || grades.length === 0) && synthesisYn === "Y" && (
-                      <div className="flex items-center gap-1 text-xs">
-                        <span className="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-500/60 text-purple-200">합성전용</span>
-                      </div>
+                    {grades?.includes("H") && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-pink-900/40 border border-pink-500/60 text-pink-200">
+                        하드
+                      </span>
+                    )}
+                    {grades?.includes("E") && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-red-900/40 border border-red-500/60 text-red-200">
+                        익스트림
+                      </span>
+                    )}
+                    {synthesisYn === "Y" && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-purple-900/40 border border-purple-500/60 text-purple-200">
+                        합성전용
+                      </span>
+                    )}
+                    {resolvedCurseBless === "CURSE" && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-rose-950/50 border border-rose-500/70 text-rose-100">
+                        저주
+                      </span>
+                    )}
+                    {resolvedCurseBless === "BLESS" && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-amber-900/40 border border-amber-400/70 text-amber-100">
+                        축복
+                      </span>
                     )}
                   </div>
                 </div>
               </td>
-              {/* 해시태그 영역 - 한 줄에 2개 이상 들어가도록 최소 너비 확보 */}
-              <td className="align-top min-w-[320px] w-[320px] pl-4 pb-4 md:pb-0 border-l border-[#b8860b]/30">
+              {/* 해시태그 영역 — md 이상에서만 표시 (모바일은 효과 섹션 위로 이동) */}
+              <td className="hidden md:table-cell align-top min-w-[320px] w-[320px] pl-4 pb-4 md:pb-0 border-l border-[#b8860b]/30">
                 {selectedTagIds.length > 0 ? (
-                  <div className="flex flex-wrap gap-2 justify-end">
-                    {hashtags
-                      .filter((tag) => selectedTagIds.includes(tag.tagId))
-                      .map((tag) => (
-                        <span
-                          key={tag.tagId}
-                          className="px-2 py-1 text-xs rounded-full bg-[#222]/80 border border-[#b8860b]/40 text-[#f0e68c] whitespace-nowrap"
-                        >
-                          #{tag.tagName}
-                        </span>
-                      ))}
-                  </div>
+                  <div className="flex flex-wrap gap-2 justify-end">{hashtagList}</div>
                 ) : (
                   <span className="text-transparent select-none">-</span>
                 )}
@@ -345,6 +359,11 @@ export default function EgoGiftPreview({
 
         {/* 상세 정보 */}
         <div className="mt-6 border-t border-[#b8860b]/30 pt-4">
+          {selectedTagIds.length > 0 && (
+            <div className="md:hidden mb-4 flex flex-wrap gap-2">
+              {hashtagList}
+            </div>
+          )}
           <h3 className="font-semibold text-[#ffcc33] mb-2">효과</h3>
 
               <div className="space-y-4">

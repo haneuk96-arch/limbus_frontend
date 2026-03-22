@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { API_BASE_URL } from "@/lib/api";
 import KeywordHighlight from "@/components/KeywordHighlight";
 import EgoGiftPreview from "@/app/dante/(admin)/egogift/components/EgoGiftPreview";
+import { normalizeCurseBlessCd } from "@/lib/egogiftCurseBless";
 
 interface DungeonEvent {
   eventId: number;
@@ -882,6 +883,10 @@ function EventPageContent() {
           cost={String(egogiftPreviewData.egogift.cost)}
           enhanceYn={egogiftPreviewData.egogift.enhanceYn}
           synthesisYn={egogiftPreviewData.egogift.synthesisYn}
+          curseBlessCd={normalizeCurseBlessCd(
+            egogiftPreviewData.egogift.curseBlessCd ??
+              egogiftPreviewData.egogift.curse_bless_cd
+          )}
           grades={egogiftPreviewData.egogift.grades || []}
           desc1={egogiftPreviewData.egogift.desc1 || ""}
           desc2={egogiftPreviewData.egogift.desc2 || ""}

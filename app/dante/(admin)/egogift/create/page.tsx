@@ -8,6 +8,7 @@ import { HASHTAG_CATEGORIES, getCategoryName } from "@/lib/hashtagCategories";
 import EgoGiftPreview from "../components/EgoGiftPreview";
 import KeywordHighlight from "@/components/KeywordHighlight";
 import { enrichKeywordData, KeywordData } from "@/lib/keywordParser";
+import { curseBlessFieldsForMultipartJson, type EgoGiftCurseBlessCd } from "@/lib/egogiftCurseBless";
 
 interface Keyword {
   keywordId: number;
@@ -38,6 +39,8 @@ export default function EgoGiftCreatePage() {
   const [cost, setCost] = useState("");
   const [enhanceYn, setEnhanceYn] = useState("Y");
   const [synthesisYn, setSynthesisYn] = useState("N");  // 합성전용 여부
+  /** '' = 미선택(DB null), CURSE/BLESS 중 하나만 */
+  const [curseBlessCd, setCurseBlessCd] = useState<"" | EgoGiftCurseBlessCd>("");
   const [selectedGrades, setSelectedGrades] = useState<string[]>([]);  // 출현난이도: 'N', 'H', 'E'
   const [desc1, setDesc1] = useState("");
   const [desc2, setDesc2] = useState("");
@@ -239,6 +242,7 @@ export default function EgoGiftCreatePage() {
         cost: cost ? Number(cost) : 0,
         enhanceYn,
         synthesisYn,
+        ...curseBlessFieldsForMultipartJson(curseBlessCd),
         grades: selectedGrades,
         desc1,
         desc2,
@@ -565,6 +569,41 @@ export default function EgoGiftCreatePage() {
                       value={option.value}
                       checked={synthesisYn === option.value}
                       onChange={(e) => setSynthesisYn(e.target.value)}
+                      className="hidden"
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-yellow-300 text-sm font-medium mb-2">
+                저주/축복{" "}
+                <span className="text-gray-500 text-xs font-normal">(선택, 하나만)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    { value: "" as const, label: "없음" },
+                    { value: "CURSE" as const, label: "저주" },
+                    { value: "BLESS" as const, label: "축복" },
+                  ] as const
+                ).map((option) => (
+                  <label
+                    key={option.value || "none"}
+                    className={`flex-1 min-w-[5.5rem] px-3 sm:px-4 py-2 rounded cursor-pointer border font-medium text-center text-sm sm:text-base ${
+                      curseBlessCd === option.value
+                        ? "bg-yellow-400 text-black border-yellow-400"
+                        : "bg-[#1c1c1f] text-gray-300 border-red-700 hover:bg-[#2a2a2d]"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="curseBlessCd"
+                      value={option.value}
+                      checked={curseBlessCd === option.value}
+                      onChange={() => setCurseBlessCd(option.value)}
                       className="hidden"
                     />
                     {option.label}
@@ -961,6 +1000,7 @@ export default function EgoGiftCreatePage() {
           cost={cost}
           enhanceYn={enhanceYn}
           synthesisYn={synthesisYn}
+          curseBlessCd={curseBlessCd === "" ? null : curseBlessCd}
           grades={selectedGrades}
           desc1={desc1}
           desc2={desc2}

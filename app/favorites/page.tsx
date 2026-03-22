@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { API_BASE_URL } from "@/lib/api";
 const RESULT_EGOGIFT_BASE_URL = API_BASE_URL.replace("/api", "");
 import { getOrCreateUUID } from "@/lib/uuid";
@@ -14,15 +15,171 @@ interface FavoriteItem {
   searchJson: string;
   createdAt: string;
   updatedAt: string;
+  /** 1: 레거시, 2: 신규 (API 미배포 시 없으면 1로 간주) */
+  schemaVersion?: number;
 }
 
-type FavoritesTab = "egogift" | "cardpack" | "result";
+type FavoritesTab = "egogift" | "result";
 
 const TAB_LIST: { key: FavoritesTab; label: string }[] = [
   { key: "result", label: "파우스트의 보고서" },
   { key: "egogift", label: "에고기프트" },
-  { key: "cardpack", label: "카드팩" },
 ];
+
+/** 스키마 v2: 진행 예정 층 행 — 1행 1~5, 2행 6~10, 3행 11~15 */
+const V2_FLOOR_ROWS = [
+  [1, 2, 3, 4, 5],
+  [6, 7, 8, 9, 10],
+  [11, 12, 13, 14, 15],
+] as const;
+type V2PlannedRowCount = 1 | 2 | 3;
+type V2PlannedFloor = (typeof V2_FLOOR_ROWS)[number][number];
+
+function inferV2PlannedRowCountFromFloorMap(byFloor: Record<number, number>): V2PlannedRowCount {
+  const floors = Object.keys(byFloor).map(Number);
+  if (floors.some((f) => f >= 11 && f <= 15)) return 3;
+  if (floors.some((f) => f >= 6 && f <= 10)) return 2;
+  return 1;
+}
+
+function parseV2PlannedRowCount(raw: unknown, byFloor: Record<number, number>): V2PlannedRowCount {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  const explicit =
+    n === 1 || n === 2 || n === 3 ? n : null;
+  const inferred = inferV2PlannedRowCountFromFloorMap(byFloor);
+  const merged = Math.max(explicit ?? 1, inferred);
+  return (merged >= 3 ? 3 : merged >= 2 ? 2 : 1) as V2PlannedRowCount;
+}
+
+/** v2 모달 탭(노말/하드/익스트림) — 선택 시 층별로 저장 */
+type V2PlannedDifficultyKey = "노말" | "하드" | "익스트림";
+
+function parsePlannedCardPackDifficultyByFloor(raw: unknown): Record<number, V2PlannedDifficultyKey> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<number, V2PlannedDifficultyKey> = {};
+  for (const [ks, val] of Object.entries(raw as Record<string, unknown>)) {
+    const k = Number(ks);
+    if (Number.isNaN(k)) continue;
+    const s = String(val);
+    if (s === "노말") out[k] = "노말";
+    else if (s === "하드") out[k] = "하드";
+    else if (s === "익스트림" || s === "평행중첩") out[k] = "익스트림";
+  }
+  return out;
+}
+
+function v2DifficultySlotLabel(d: V2PlannedDifficultyKey): string {
+  return d === "익스트림" ? "평행중첩" : d;
+}
+
+function v2SlotBorderClass(d: V2PlannedDifficultyKey | undefined): string {
+  if (!d) return "border-[#b8860b]/50 hover:border-yellow-400/60";
+  if (d === "노말") return "border-lime-400/90 hover:border-lime-300 ring-1 ring-lime-400/30";
+  if (d === "하드") return "border-pink-400/90 hover:border-pink-300 ring-1 ring-pink-400/30";
+  return "border-red-500 hover:border-red-400 ring-1 ring-red-500/40";
+}
+
+/** 모달 열 때 층별 난이도 탭 초기값: 1~5 노말, 6층 이상 익스트림(평행중첩) */
+function getV2ModalDefaultDifficultyForFloor(floor: number): V2PlannedDifficultyKey {
+  if (floor >= 6) return "익스트림";
+  return "노말";
+}
+
+const MODAL_DIFFICULTY_ALLOWED: Record<string, string[]> = {
+  노말: ["노말"],
+  하드: ["하드"],
+  익스트림: ["하드", "익스트림"],
+};
+
+/** v2 모달 → for-limited-starred-egogifts API (탭별 난이도 파라미터) */
+const V2_MODAL_TAB_API_DIFFICULTIES: Record<V2PlannedDifficultyKey, readonly string[]> = {
+  노말: ["노말"],
+  하드: ["하드"],
+  익스트림: ["하드", "익스트림"],
+};
+
+interface PlannableCardPack {
+  cardpackId: number;
+  title: string;
+  thumbnail?: string;
+  floors: number[];
+  difficulties: string[];
+  /** API가 내려주면 탭(노말/하드/익스트림)별로 출현 층을 정확히 필터 */
+  difficultyFloors?: Array<{ difficulty: string; floors: number[] }>;
+}
+
+function parseDifficultyFloorsFromRow(row: Record<string, unknown>): Array<{ difficulty: string; floors: number[] }> | undefined {
+  const df = row.difficultyFloors;
+  if (!Array.isArray(df) || df.length === 0) return undefined;
+  const out: Array<{ difficulty: string; floors: number[] }> = [];
+  for (const item of df as { difficulty?: unknown; floors?: unknown[] }[]) {
+    const diff = item?.difficulty != null ? String(item.difficulty) : "";
+    if (!diff) continue;
+    const floors = Array.isArray(item?.floors)
+      ? (item.floors as unknown[]).map((x) => Number(x)).filter((n) => !Number.isNaN(n))
+      : [];
+    if (floors.length > 0) out.push({ difficulty: diff, floors });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function parsePlannableCardPackRow(row: Record<string, unknown>): PlannableCardPack | null {
+  const id = Number(row.cardpackId);
+  if (!id) return null;
+  let floors: number[] = Array.isArray(row.floors)
+    ? (row.floors as unknown[]).map((x) => Number(x)).filter((n) => !Number.isNaN(n))
+    : [];
+  const difficultyFloors = parseDifficultyFloorsFromRow(row);
+  if (floors.length === 0 && difficultyFloors?.length) {
+    const s = new Set<number>();
+    for (const item of difficultyFloors) {
+      for (const f of item.floors) s.add(f);
+    }
+    floors = [...s].sort((a, b) => a - b);
+  }
+  const difficulties = Array.isArray(row.difficulties)
+    ? (row.difficulties as unknown[]).map((x) => String(x))
+    : [];
+  return {
+    cardpackId: id,
+    title: String(row.title ?? ""),
+    thumbnail: row.thumbnail != null ? String(row.thumbnail) : undefined,
+    floors,
+    difficulties,
+    difficultyFloors,
+  };
+}
+
+/** 모달 탭(노말/하드/익스트림)과 DB 난이도 문자열이 같은 출현 행에 매칭되는지 */
+function entryDifficultyMatchesModalTab(entryDifficulty: string, modalTab: string): boolean {
+  const allowed = MODAL_DIFFICULTY_ALLOWED[modalTab];
+  if (!allowed?.length) return true;
+  if (allowed.includes(entryDifficulty)) return true;
+  if (modalTab === "익스트림" && entryDifficulty === "평행중첩") return true;
+  return false;
+}
+
+function packMatchesFloorAndModalDifficulty(
+  pack: PlannableCardPack,
+  floor: number,
+  difficultyKey: string
+): boolean {
+  const dfs = pack.difficultyFloors;
+  if (dfs && dfs.length > 0) {
+    return dfs.some(
+      (block) =>
+        entryDifficultyMatchesModalTab(block.difficulty, difficultyKey) && block.floors.includes(floor)
+    );
+  }
+  // 레거시: 난이도별 층 미제공 시 기존(합집합 floors + 난이도 목록) 로직
+  if (!pack.floors.includes(floor)) return false;
+  const allowed = MODAL_DIFFICULTY_ALLOWED[difficultyKey];
+  if (!allowed?.length) return true;
+  if (pack.difficulties.length === 0) return true;
+  return pack.difficulties.some(
+    (d) => allowed.includes(d) || (d === "평행중첩" && difficultyKey === "익스트림")
+  );
+}
 
 const RESULT_KEYWORD_ICON_MAP: Record<string, string> = {
   화상: "/images/keyword/Burn.webp",
@@ -35,6 +192,29 @@ const RESULT_KEYWORD_ICON_MAP: Record<string, string> = {
   참격: "/images/keyword/slash.webp",
   관통: "/images/keyword/penetration.webp",
   타격: "/images/keyword/blow.webp",
+};
+
+/** 한정 에고기프트 ID 집합 동일 여부 (순서 무관) */
+function limitedEgoGiftIdSetsEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort((x, y) => x - y);
+  const sb = [...b].sort((x, y) => x - y);
+  return sa.every((v, i) => v === sb[i]);
+}
+
+/** smaller가 larger의 진부분집합인지 (이미 정렬된 배열 기준으로도 동작) */
+function isProperSubsetById(smaller: number[], larger: number[]): boolean {
+  if (smaller.length >= larger.length) return false;
+  const setL = new Set(larger);
+  return smaller.every((id) => setL.has(id));
+}
+
+type MissedLimitedFetchSnapshot = {
+  limitedIdsSorted: number[];
+  excludeIdsSorted: number[];
+  schemaVersion: number;
+  /** v2: "v2:all" / v1: 난이도·층 */
+  filterKey: string;
 };
 
 export default function FavoritesPage() {
@@ -63,7 +243,7 @@ export default function FavoritesPage() {
   const [deleteConfirmFavoriteId, setDeleteConfirmFavoriteId] = useState<number | null>(null);
   /** 에고기프트 탭에서 별로 선택한 에고기프트 ID 목록 (저장 시 JSON에 egogiftIds로 포함) */
   const [starredEgoGiftIds, setStarredEgoGiftIds] = useState<number[]>([]);
-  /** 카드팩 탭에서 별로 선택한 카드팩 ID 목록 (저장 시 JSON에 cardPackIds로 포함) */
+  /** 보고서에 포함된 카드팩 ID (JSON 동기화, 결과 탭 표시용) */
   const [starredCardPackIds, setStarredCardPackIds] = useState<number[]>([]);
   /** 등록된 즐겨찾기 목록에서 선택한 항목 (favoriteId, null이면 미선택) */
   const [selectedFavoriteId, setSelectedFavoriteId] = useState<number | null>(null);
@@ -88,6 +268,12 @@ export default function FavoritesPage() {
   const [synthesisRecipes, setSynthesisRecipes] = useState<
     { resultEgogiftId: number; resultGiftName: string; resultThumbnail?: string; resultGrades?: string[]; materials: { egogiftId: number; giftName: string; thumbnail?: string; grades?: string[] }[] }[]
   >([]);
+  /** 이전 starredEgoGiftIds — X로 일부만 제거할 때 전체 패널 로딩(불러오는 중) 스킵용 */
+  const prevStarredEgoGiftIdsForResultFetchRef = useRef<number[]>([]);
+  /** 놓친 한정 카드팩 마지막 조회 스냅샷 — 동일 조건·동일 한정 ID면 재요청 생략, 한정 ID만 감소 시 로딩 스킵 */
+  const missedLimitedLastFetchSnapshotRef = useRef<MissedLimitedFetchSnapshot | null>(null);
+  /** 스키마 v2+ 자동 저장: 보고서 전환·불러오기 직후 1회는 저장 스킵 */
+  const v2AutosaveSkipNextRef = useRef(true);
   /** 키워드별 카드 영역만 캡처용 (키워드 클릭 시, 합성 조합식 제외) */
   const keywordSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   /** 키워드별 합성 조합식 영역만 캡처용 (조합식 클릭 시) */
@@ -96,6 +282,8 @@ export default function FavoritesPage() {
   const allResultRef = useRef<HTMLDivElement | null>(null);
   /** 선택한 카드팩 목록 섹션 전체 캡처용 */
   const starredCardPacksSectionRef = useRef<HTMLDivElement | null>(null);
+  /** 스키마 v2 진행(예정) 카드팩 그리드 섹션 캡처용 */
+  const v2PlannedCardPacksSectionRef = useRef<HTMLDivElement | null>(null);
   /** 결과 탭에서 에고기프트 클릭 시 상세 모달 열기 (EgoGiftPageContent가 설정) */
   const egoGiftPreviewOpenRef = useRef<((giftName: string) => void) | null>(null);
   /** 결과 탭에서 카드팩 클릭 시 상세 모달 열기 (CardPackPageContent가 설정) */
@@ -130,6 +318,8 @@ export default function FavoritesPage() {
     difficultyFloors?: Array<{ difficulty: string; floors: number[] }>;
   }>>([]);
   const [resultLimitedEgoGiftCardPacksLoading, setResultLimitedEgoGiftCardPacksLoading] = useState(false);
+  /** 놓친 한정 에고기프트 출현 카드팩 영역 펼침 (v1·v2 공통) */
+  const [missedLimitedCardPacksExpanded, setMissedLimitedCardPacksExpanded] = useState(true);
   /** 결과 탭 카드팩: 층별 체크 1개 (floor -> cardpackId), JSON 저장용 */
   const [checkedCardPackByFloor, setCheckedCardPackByFloor] = useState<Record<number, number>>({});
   /** 결과 탭 에고기프트: 체크한 에고기프트 ID 목록 */
@@ -181,11 +371,201 @@ export default function FavoritesPage() {
     );
   };
 
+  /** 결과 탭 키워드별 카드에서 즐겨찾기(보고서에 포함된 에고기프트) 해제 */
+  const removeStarredEgoGift = (egogiftId: number) => {
+    setStarredEgoGiftIds((prev) => prev.filter((id) => id !== egogiftId));
+    setCheckedEgoGiftIds((prev) => prev.filter((id) => id !== egogiftId));
+    setResultEgoGifts((prev) => prev.filter((eg) => eg.egogiftId !== egogiftId));
+    setSynthesisRecipes((prev) => prev.filter((r) => r.resultEgogiftId !== egogiftId));
+  };
+
   const handleCardPackStarToggle = (cardpackId: number) => {
     setStarredCardPackIds((prev) =>
       prev.includes(cardpackId) ? prev.filter((id) => id !== cardpackId) : [...prev, cardpackId]
     );
   };
+
+  /** 선택 중인 보고서의 스키마 버전 (2일 때 진행 예정 카드팩 그리드 등) */
+  const selectedReportSchemaVersion = useMemo(() => {
+    if (selectedFavoriteId == null) return 1;
+    const item = items.find((i) => i.favoriteId === selectedFavoriteId);
+    const v = item?.schemaVersion;
+    return v === 2 ? 2 : 1;
+  }, [selectedFavoriteId, items]);
+
+  /** 스키마 2 이상 보고서 (자동 저장 등) */
+  const favoriteSchemaV2OrHigher = useMemo(() => {
+    if (selectedFavoriteId == null) return false;
+    const item = items.find((i) => i.favoriteId === selectedFavoriteId);
+    return (item?.schemaVersion ?? 1) >= 2;
+  }, [selectedFavoriteId, items]);
+
+  /** 스키마 v2: 전체 카드팩 목록 (층·난이도 필터는 프론트에서 분류) */
+  const [plannableCardPacks, setPlannableCardPacks] = useState<PlannableCardPack[]>([]);
+  const [plannableCardPacksLoading, setPlannableCardPacksLoading] = useState(false);
+  /** v2: N층 슬롯 클릭 시 출현 카드팩 선택 모달 */
+  const [v2FloorModalFloor, setV2FloorModalFloor] = useState<V2PlannedFloor | null>(null);
+  const [v2ModalDifficulty, setV2ModalDifficulty] = useState<V2PlannedDifficultyKey>("노말");
+  const [v2ModalTitleSearch, setV2ModalTitleSearch] = useState("");
+  /** v2 모달: 즐겨찾기 한정 에고기프트가 이 층·난이도에서 나올 수 있는 카드팩 ID */
+  const [v2ModalLimitedHighlightIds, setV2ModalLimitedHighlightIds] = useState<number[]>([]);
+  /** v2: 층별 카드팩 선택 시 모달에서 고른 난이도 탭 (저장 JSON: plannedCardPackDifficultyByFloor) */
+  const [plannedCardPackDifficultyByFloor, setPlannedCardPackDifficultyByFloor] = useState<
+    Record<number, V2PlannedDifficultyKey>
+  >({});
+  /** v2: 진행 예정 그리드 행 수 (1=1~5층만, 2=+6~10, 3=+11~15). JSON: plannedFloorRowCount */
+  const [v2PlannedFloorRowCount, setV2PlannedFloorRowCount] = useState<V2PlannedRowCount>(1);
+  const [portalMounted, setPortalMounted] = useState(false);
+  useEffect(() => {
+    setPortalMounted(true);
+  }, []);
+
+  const commitV2FloorSelection = useCallback(
+    (floor: V2PlannedFloor, packId: number | null, difficultyWhenSelected?: V2PlannedDifficultyKey) => {
+      setCheckedCardPackByFloor((prev) => {
+        const next = { ...prev };
+        if (packId == null) {
+          delete next[floor];
+        } else {
+          next[floor] = packId;
+        }
+        const ids = [
+          ...new Set(
+            Object.values(next).filter((x): x is number => typeof x === "number" && !Number.isNaN(x) && x > 0)
+          ),
+        ];
+        setStarredCardPackIds(ids);
+        return next;
+      });
+      setPlannedCardPackDifficultyByFloor((prev) => {
+        const next = { ...prev };
+        if (packId == null) {
+          delete next[floor];
+        } else if (difficultyWhenSelected) {
+          next[floor] = difficultyWhenSelected;
+        }
+        return next;
+      });
+      setV2FloorModalFloor(null);
+    },
+    []
+  );
+
+  const addV2PlannedFloorRow = useCallback(() => {
+    setV2PlannedFloorRowCount((prev) => (prev >= 3 ? 3 : ((prev + 1) as V2PlannedRowCount)));
+  }, []);
+
+  const removeLastV2PlannedFloorRow = useCallback(() => {
+    setV2PlannedFloorRowCount((prev) => {
+      if (prev <= 1) return 1;
+      const rowFloors = [...V2_FLOOR_ROWS[prev - 1]];
+      setCheckedCardPackByFloor((c) => {
+        const next = { ...c };
+        for (const f of rowFloors) delete next[f];
+        const ids = [
+          ...new Set(
+            Object.values(next).filter((x): x is number => typeof x === "number" && !Number.isNaN(x) && x > 0)
+          ),
+        ];
+        setStarredCardPackIds(ids);
+        return next;
+      });
+      setPlannedCardPackDifficultyByFloor((p) => {
+        const next = { ...p };
+        for (const f of rowFloors) delete next[f];
+        return next;
+      });
+      return (prev - 1) as V2PlannedRowCount;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (selectedFavoriteId == null || selectedReportSchemaVersion !== 2) {
+      setPlannableCardPacks([]);
+      setV2PlannedFloorRowCount(1);
+      return;
+    }
+    let cancelled = false;
+    setPlannableCardPacksLoading(true);
+    fetch(`${API_BASE_URL}/user/cardpack?page=1&size=1000`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((data: { items?: unknown[] }) => {
+        if (cancelled) return;
+        const rows = (data.items ?? [])
+          .map((row: unknown) => parsePlannableCardPackRow(row as Record<string, unknown>))
+          .filter(Boolean) as PlannableCardPack[];
+        setPlannableCardPacks(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPlannableCardPacks([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPlannableCardPacksLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFavoriteId, selectedReportSchemaVersion]);
+
+  const v2ModalFilteredPacks = useMemo(() => {
+    if (v2FloorModalFloor == null) return [];
+    return plannableCardPacks.filter((p) =>
+      packMatchesFloorAndModalDifficulty(p, v2FloorModalFloor, v2ModalDifficulty)
+    );
+  }, [plannableCardPacks, v2FloorModalFloor, v2ModalDifficulty]);
+
+  const v2ModalDisplayPacks = useMemo(() => {
+    const q = v2ModalTitleSearch.trim().toLowerCase();
+    if (!q) return v2ModalFilteredPacks;
+    return v2ModalFilteredPacks.filter((p) => p.title.toLowerCase().includes(q));
+  }, [v2ModalFilteredPacks, v2ModalTitleSearch]);
+
+  const v2ModalLimitedIdSet = useMemo(() => new Set(v2ModalLimitedHighlightIds), [v2ModalLimitedHighlightIds]);
+
+  /** 층 모달 열 때 난이도·검색 초기화 — layout에서 먼저 반영해 한정 하이라이트 조회와 탭이 맞물리게 함 */
+  useLayoutEffect(() => {
+    if (v2FloorModalFloor != null) {
+      setV2ModalDifficulty(getV2ModalDefaultDifficultyForFloor(v2FloorModalFloor));
+      setV2ModalTitleSearch("");
+    }
+  }, [v2FloorModalFloor]);
+
+  // v2 모달: 즐겨찾기 중 한정 카테고리 에고기프트가 출현 가능한 카드팩 (현재 층·난이도 탭 기준, 제외 필터 없음)
+  useEffect(() => {
+    if (v2FloorModalFloor == null || activeTab !== "result") {
+      setV2ModalLimitedHighlightIds([]);
+      return;
+    }
+    const difficulties = V2_MODAL_TAB_API_DIFFICULTIES[v2ModalDifficulty];
+    const limitedStarredEgoGiftIds = resultEgoGifts
+      .filter((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0)
+      .map((eg) => eg.egogiftId);
+    if (!difficulties?.length || limitedStarredEgoGiftIds.length === 0) {
+      setV2ModalLimitedHighlightIds([]);
+      return;
+    }
+    let cancelled = false;
+    const difficultyParams = difficulties.map((d) => `difficulties=${encodeURIComponent(d)}`).join("&");
+    const egogiftParams = limitedStarredEgoGiftIds.map((id) => `egogiftIds=${id}`).join("&");
+    const query = `${difficultyParams}&floor=${v2FloorModalFloor}&${egogiftParams}`;
+    fetch(`${API_BASE_URL}/user/cardpack/for-limited-starred-egogifts?${query}`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : { items: [] }))
+      .then((data: { items?: unknown[] }) => {
+        if (cancelled) return;
+        const items = Array.isArray(data.items) ? data.items : [];
+        setV2ModalLimitedHighlightIds(
+          items
+            .map((item) => Number((item as { cardpackId?: unknown }).cardpackId))
+            .filter((id) => !Number.isNaN(id) && id > 0)
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setV2ModalLimitedHighlightIds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [v2FloorModalFloor, v2ModalDifficulty, resultEgoGifts, activeTab]);
 
   const fetchFavorites = useCallback(async (): Promise<FavoriteItem[]> => {
     const uuid = getOrCreateUUID();
@@ -203,7 +583,15 @@ export default function FavoritesPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        const list = data.items ?? [];
+        const rawList = data.items ?? [];
+        const list: FavoriteItem[] = rawList.map((raw: Record<string, unknown>) => ({
+          favoriteId: Number(raw.favoriteId),
+          pageType: String(raw.pageType ?? ""),
+          searchJson: String(raw.searchJson ?? "{}"),
+          createdAt: String(raw.createdAt ?? ""),
+          updatedAt: String(raw.updatedAt ?? ""),
+          schemaVersion: typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1,
+        }));
         setItems(list);
         return list;
       }
@@ -222,14 +610,31 @@ export default function FavoritesPage() {
     fetchFavorites();
   }, [fetchFavorites]);
 
+  useEffect(() => {
+    missedLimitedLastFetchSnapshotRef.current = null;
+  }, [selectedFavoriteId]);
+
   // 결과 탭: 선택한 즐겨찾기의 에고기프트 ID로 목록 조회 후 키워드별 표시용으로 저장
   useEffect(() => {
     if (activeTab !== "result" || starredEgoGiftIds.length === 0) {
       setResultEgoGifts([]);
+      setResultEgoGiftsLoading(false);
+      if (starredEgoGiftIds.length === 0) {
+        prevStarredEgoGiftIdsForResultFetchRef.current = [];
+      }
       return;
     }
+    const prevIds = prevStarredEgoGiftIdsForResultFetchRef.current;
+    const prevSet = new Set(prevIds);
+    const isStrictSubsetRemoval =
+      prevIds.length > starredEgoGiftIds.length &&
+      starredEgoGiftIds.every((id) => prevSet.has(id));
+    prevStarredEgoGiftIdsForResultFetchRef.current = [...starredEgoGiftIds];
+
     let cancelled = false;
-    setResultEgoGiftsLoading(true);
+    if (!isStrictSubsetRemoval) {
+      setResultEgoGiftsLoading(true);
+    }
     fetch(`${API_BASE_URL}/user/egogift?page=0&size=10000`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : { items: [] }))
       .then((data) => {
@@ -295,10 +700,11 @@ export default function FavoritesPage() {
     };
   }, [activeTab, starredEgoGiftIds]);
 
-  // 결과 탭: 선택한 카드팩 목록 ID 목록으로 조회
+  // 결과 탭: 선택한 카드팩 목록 ID 목록으로 조회 (v2는 진행 예정 슬롯만 사용 — 중복 목록 없음)
   useEffect(() => {
-    if (activeTab !== "result" || starredCardPackIds.length === 0) {
+    if (activeTab !== "result" || starredCardPackIds.length === 0 || selectedReportSchemaVersion === 2) {
       setResultStarredCardPacks([]);
+      if (selectedReportSchemaVersion === 2) setResultStarredCardPacksLoading(false);
       return;
     }
     let cancelled = false;
@@ -329,24 +735,16 @@ export default function FavoritesPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, starredCardPackIds]);
+  }, [activeTab, starredCardPackIds, selectedReportSchemaVersion]);
 
-  // 결과 탭: 난이도 선택 시 한정 에고기프트 출현 카드팩 조회 (층 전체 선택 시에도 조회)
+  // 결과 탭: 한정 즐겨찾기 에고기프트 출현 카드팩 중 아직 선택 목록에 없는 것 (v1: 난이도·층 필터 / v2: 전 난이도·전 층)
   useEffect(() => {
     const difficulty = resultCardPackDifficulty;
     const floor = resultCardPackFloor;
-    if (activeTab !== "result" || difficulty == null) {
+    if (activeTab !== "result") {
       setResultLimitedEgoGiftCardPacks([]);
-      return;
-    }
-    const allowedByDifficulty: Record<string, string[]> = {
-      노말: ["노말"],
-      하드: ["하드"],
-      익스트림: ["하드", "익스트림"],
-    };
-    const difficulties = allowedByDifficulty[difficulty];
-    if (!difficulties?.length) {
-      setResultLimitedEgoGiftCardPacks([]);
+      setResultLimitedEgoGiftCardPacksLoading(false);
+      missedLimitedLastFetchSnapshotRef.current = null;
       return;
     }
     const limitedStarredEgoGiftIds = resultEgoGifts
@@ -354,15 +752,69 @@ export default function FavoritesPage() {
       .map((eg) => eg.egogiftId);
     if (limitedStarredEgoGiftIds.length === 0) {
       setResultLimitedEgoGiftCardPacks([]);
+      setResultLimitedEgoGiftCardPacksLoading(false);
+      missedLimitedLastFetchSnapshotRef.current = null;
       return;
     }
+
+    let difficulties: string[];
+    let floorParam: number | null | undefined;
+
+    if (selectedReportSchemaVersion === 2) {
+      // 스키마 v2: 노말·하드·익스트림 전체, 층 미지정(모든 층) — 진행 예정 슬롯에 넣지 않은 카드팩 표시
+      difficulties = ["노말", "하드", "익스트림"];
+      floorParam = null;
+    } else {
+      if (difficulty == null) {
+        setResultLimitedEgoGiftCardPacks([]);
+        setResultLimitedEgoGiftCardPacksLoading(false);
+        missedLimitedLastFetchSnapshotRef.current = null;
+        return;
+      }
+      const allowedByDifficulty: Record<string, string[]> = {
+        노말: ["노말"],
+        하드: ["하드"],
+        익스트림: ["하드", "익스트림"],
+      };
+      const d = allowedByDifficulty[difficulty];
+      if (!d?.length) {
+        setResultLimitedEgoGiftCardPacks([]);
+        setResultLimitedEgoGiftCardPacksLoading(false);
+        missedLimitedLastFetchSnapshotRef.current = null;
+        return;
+      }
+      difficulties = [...d];
+      floorParam = floor;
+    }
+
+    const curLimitedSorted = [...limitedStarredEgoGiftIds].sort((a, b) => a - b);
+    const curExcludeSorted = [...starredCardPackIds].sort((a, b) => a - b);
+    const filterKey =
+      selectedReportSchemaVersion === 2
+        ? "v2:all"
+        : `v1:${difficulty}:${floor === null ? "all" : floor}`;
+    const snap = missedLimitedLastFetchSnapshotRef.current;
+    const contextMatch =
+      snap != null &&
+      snap.schemaVersion === selectedReportSchemaVersion &&
+      snap.filterKey === filterKey &&
+      limitedEgoGiftIdSetsEqual(snap.excludeIdsSorted, curExcludeSorted);
+    // 한정이 아닌 에고기프트만 제거한 경우: 조회 생략(깜빡임 방지)
+    if (contextMatch && limitedEgoGiftIdSetsEqual(snap.limitedIdsSorted, curLimitedSorted)) {
+      return;
+    }
+    const skipMissedLimitedLoading =
+      contextMatch && snap != null && isProperSubsetById(curLimitedSorted, snap.limitedIdsSorted);
+
     let cancelled = false;
-    setResultLimitedEgoGiftCardPacksLoading(true);
+    if (!skipMissedLimitedLoading) {
+      setResultLimitedEgoGiftCardPacksLoading(true);
+    }
     const difficultyParams = difficulties.map((d) => `difficulties=${encodeURIComponent(d)}`).join("&");
     const egogiftParams = limitedStarredEgoGiftIds.map((id) => `egogiftIds=${id}`).join("&");
     const excludeParams = starredCardPackIds.length > 0 ? starredCardPackIds.map((id) => `excludeCardpackIds=${id}`).join("&") : "";
-    const floorParam = floor != null ? `floor=${floor}` : "";
-    const query = [difficultyParams, floorParam, egogiftParams, excludeParams].filter(Boolean).join("&");
+    const floorParamStr = floorParam != null ? `floor=${floorParam}` : "";
+    const query = [difficultyParams, floorParamStr, egogiftParams, excludeParams].filter(Boolean).join("&");
     fetch(`${API_BASE_URL}/user/cardpack/for-limited-starred-egogifts?${query}`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : { items: [] }))
       .then((data) => {
@@ -378,9 +830,18 @@ export default function FavoritesPage() {
             difficultyFloors: Array.isArray(item.difficultyFloors) ? item.difficultyFloors : [],
           }))
         );
+        missedLimitedLastFetchSnapshotRef.current = {
+          limitedIdsSorted: curLimitedSorted,
+          excludeIdsSorted: curExcludeSorted,
+          schemaVersion: selectedReportSchemaVersion,
+          filterKey,
+        };
       })
       .catch(() => {
-        if (!cancelled) setResultLimitedEgoGiftCardPacks([]);
+        if (!cancelled) {
+          setResultLimitedEgoGiftCardPacks([]);
+          missedLimitedLastFetchSnapshotRef.current = null;
+        }
       })
       .finally(() => {
         if (!cancelled) setResultLimitedEgoGiftCardPacksLoading(false);
@@ -388,7 +849,7 @@ export default function FavoritesPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, resultCardPackDifficulty, resultCardPackFloor, resultEgoGifts, starredCardPackIds]);
+  }, [activeTab, resultCardPackDifficulty, resultCardPackFloor, resultEgoGifts, starredCardPackIds, selectedReportSchemaVersion]);
 
   // 결과 탭: 키워드별 그룹 (키워드 순서 고정, 기타는 맨 뒤), 그룹 내는 등급 낮은 순(1 → 2 → … → EX)
   const RESULT_KEYWORD_ORDER = [
@@ -483,6 +944,7 @@ export default function FavoritesPage() {
         el.classList.add("keyword-capture-hex");
         await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
         await new Promise<void>((r) => setTimeout(r, 80));
+        await document.fonts.ready;
         const origError = console.error;
         const origWarn = console.warn;
         const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
@@ -570,6 +1032,7 @@ export default function FavoritesPage() {
         el.classList.add("keyword-capture-hex");
         await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
         await new Promise<void>((r) => setTimeout(r, 80));
+        await document.fonts.ready;
         const origError = console.error;
         const origWarn = console.warn;
         const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
@@ -657,6 +1120,7 @@ export default function FavoritesPage() {
         cardEl.classList.add("keyword-capture-hex");
         await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
         await new Promise<void>((r) => setTimeout(r, 80));
+        await document.fonts.ready;
         const origError = console.error;
         const origWarn = console.warn;
         const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
@@ -701,87 +1165,102 @@ export default function FavoritesPage() {
     [getFavoriteTitle]
   );
 
-  const captureStarredCardPacksSectionAsImage = useCallback(async () => {
-    const el = starredCardPacksSectionRef.current;
-    if (!el || typeof window === "undefined") return;
-    const favoriteTitle = getFavoriteTitle();
-    const dateStr = (() => {
-      const d = new Date();
-      const pad = (n: number) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    })();
-    const baseName = `${favoriteTitle}_즐겨찾기한카드팩_${dateStr}.png`;
+  /** 카드팩 목록형 섹션 DOM → PNG (선택한 카드팩 / 진행 예정 등 공통) */
+  const captureCardPackListRegionAsImage = useCallback(
+    async (el: HTMLElement | null, fileNameMiddle: string) => {
+      if (!el || typeof window === "undefined") return;
+      const favoriteTitle = getFavoriteTitle();
+      const dateStr = (() => {
+        const d = new Date();
+        const pad = (n: number) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+      })();
+      const baseName = `${favoriteTitle}_${fileNameMiddle}_${dateStr}.png`;
 
-    const restores: { img: HTMLImageElement; originalSrc: string; blobUrl: string }[] = [];
-    try {
-      const imgs = el.querySelectorAll<HTMLImageElement>("img[src]");
-      const baseOrigin = window.location.origin;
-      for (const img of imgs) {
-        const src = img.getAttribute("src");
-        if (!src || src.startsWith("data:") || src.startsWith("blob:")) continue;
-        try {
-          const imgOrigin = new URL(src, window.location.href).origin;
-          if (imgOrigin === baseOrigin) continue;
-          let res = await fetch(src, { credentials: "include", mode: "cors" }).catch(() => null);
-          if (!res?.ok) {
-            const proxyUrl = `${window.location.origin}/api/proxy-image?url=${encodeURIComponent(src)}`;
-            res = await fetch(proxyUrl).catch(() => null);
+      const restores: { img: HTMLImageElement; originalSrc: string; blobUrl: string }[] = [];
+      try {
+        const imgs = el.querySelectorAll<HTMLImageElement>("img[src]");
+        for (const img of imgs) {
+          const src = img.getAttribute("src");
+          if (!src || src.startsWith("data:") || src.startsWith("blob:")) continue;
+          try {
+            const absUrl = new URL(src, window.location.href).href;
+            // 동일 출처도 blob으로 바꿔 html2canvas가 썸네일을 안정적으로 그리도록 (진행 예정 슬롯 등)
+            let res = await fetch(absUrl, { credentials: "include", mode: "cors" }).catch(() => null);
+            if (!res?.ok) {
+              const proxyUrl = `${window.location.origin}/api/proxy-image?url=${encodeURIComponent(absUrl)}`;
+              res = await fetch(proxyUrl).catch(() => null);
+            }
+            if (!res?.ok) continue;
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            restores.push({ img, originalSrc: src, blobUrl });
+            img.src = blobUrl;
+            await img.decode?.().catch(() => new Promise<void>((r) => { img.onload = () => r(); }));
+          } catch {
+            /* skip */
           }
-          if (!res?.ok) continue;
-          const blob = await res.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          restores.push({ img, originalSrc: src, blobUrl });
-          img.src = blobUrl;
-          await img.decode?.().catch(() => new Promise<void>((r) => { img.onload = () => r(); }));
-        } catch {
-          /* skip */
         }
+        const { default: html2canvas } = await import("html2canvas");
+        el.classList.add("keyword-capture-hex");
+        const prevMinHeight = el.style.minHeight;
+        el.style.minHeight = `${el.scrollHeight}px`;
+        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+        await new Promise<void>((r) => setTimeout(r, 80));
+        await document.fonts.ready;
+        const origError = console.error;
+        const origWarn = console.warn;
+        const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
+          const msg = typeof args[0] === "string" ? args[0] : String(args[0] ?? "");
+          if (/lab|lch|oklab|oklch|unsupported color/i.test(msg)) return;
+          fn.apply(console, args);
+        };
+        console.error = suppressColorParse(origError);
+        console.warn = suppressColorParse(origWarn);
+        const canvas = await html2canvas(el, {
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: "#131316",
+          scale: 2,
+          logging: false,
+        });
+        console.error = origError;
+        console.warn = origWarn;
+        el.style.minHeight = prevMinHeight;
+        el.classList.remove("keyword-capture-hex");
+        for (const { img, originalSrc, blobUrl } of restores) {
+          img.src = originalSrc;
+          URL.revokeObjectURL(blobUrl);
+        }
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = baseName;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, "image/png");
+      } catch (err) {
+        el.style.minHeight = "";
+        el.classList.remove("keyword-capture-hex");
+        for (const { img, originalSrc, blobUrl } of restores) {
+          img.src = originalSrc;
+          URL.revokeObjectURL(blobUrl);
+        }
+        console.error("카드팩 목록 영역 캡처 실패:", err);
       }
-      const { default: html2canvas } = await import("html2canvas");
-      el.classList.add("keyword-capture-hex");
-      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      await new Promise<void>((r) => setTimeout(r, 80));
-      const origError = console.error;
-      const origWarn = console.warn;
-      const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
-        const msg = typeof args[0] === "string" ? args[0] : String(args[0] ?? "");
-        if (/lab|lch|oklab|oklch|unsupported color/i.test(msg)) return;
-        fn.apply(console, args);
-      };
-      console.error = suppressColorParse(origError);
-      console.warn = suppressColorParse(origWarn);
-      const canvas = await html2canvas(el, {
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: "#131316",
-        scale: 2,
-        logging: false,
-      });
-      console.error = origError;
-      console.warn = origWarn;
-      el.classList.remove("keyword-capture-hex");
-      for (const { img, originalSrc, blobUrl } of restores) {
-        img.src = originalSrc;
-        URL.revokeObjectURL(blobUrl);
-      }
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = baseName;
-        a.click();
-        URL.revokeObjectURL(url);
-      }, "image/png");
-    } catch (err) {
-      el.classList.remove("keyword-capture-hex");
-      for (const { img, originalSrc, blobUrl } of restores) {
-        img.src = originalSrc;
-        URL.revokeObjectURL(blobUrl);
-      }
-      console.error("선택한 카드팩 목록 영역 캡처 실패:", err);
-    }
-  }, [getFavoriteTitle]);
+    },
+    [getFavoriteTitle]
+  );
+
+  const captureStarredCardPacksSectionAsImage = useCallback(async () => {
+    await captureCardPackListRegionAsImage(starredCardPacksSectionRef.current, "즐겨찾기한카드팩");
+  }, [captureCardPackListRegionAsImage]);
+
+  const captureV2PlannedCardPacksSectionAsImage = useCallback(async () => {
+    await captureCardPackListRegionAsImage(v2PlannedCardPacksSectionRef.current, "진행예정카드팩목록");
+  }, [captureCardPackListRegionAsImage]);
 
   const resultEgoGiftsByKeyword = useMemo(() => {
     const map = new Map<string, typeof resultEgoGifts>();
@@ -884,6 +1363,8 @@ export default function FavoritesPage() {
       cardPackIds: [] as number[],
       cardPackDifficulty: "노말" as string,
       cardPackCheckedByFloor: {} as Record<string, number>,
+      plannedCardPackDifficultyByFloor: {} as Record<string, string>,
+      plannedFloorRowCount: 1,
     };
     const payload = { searchJson: JSON.stringify(merged) };
     setRegistering(true);
@@ -902,6 +1383,8 @@ export default function FavoritesPage() {
         setStarredCardPackIds([]);
         setResultCardPackDifficulty("노말");
         setCheckedCardPackByFloor({});
+        setPlannedCardPackDifficultyByFloor({});
+        setV2PlannedFloorRowCount(1);
         setCheckedEgoGiftIds([]);
         setSelectedFavoriteId(null);
         await fetchFavorites();
@@ -917,17 +1400,25 @@ export default function FavoritesPage() {
     }
   };
 
-  /** 선택된 즐겨찾기 전체 저장 (상단 저장 버튼용) */
-  const handleSave = async () => {
+  /** 선택된 즐겨찾기 전체 저장 (상단 저장 버튼·스키마 v2+ 자동 저장) */
+  const handleSave = useCallback(async () => {
     if (selectedFavoriteId === null) return;
     const uuid = getOrCreateUUID();
     if (!uuid) {
       setError("UUID를 생성할 수 없습니다.");
       return;
     }
-    const isCardPack = activeTab === "cardpack";
     const existing = items.find((i) => i.favoriteId === selectedFavoriteId);
-    let parsed: { title?: string; egogiftIds?: number[]; cardPackIds?: number[]; cardPackDifficulty?: string; cardPackCheckedByFloor?: Record<string, number>; checkedEgoGiftIds?: number[] } = {};
+    let parsed: {
+      title?: string;
+      egogiftIds?: number[];
+      cardPackIds?: number[];
+      cardPackDifficulty?: string;
+      cardPackCheckedByFloor?: Record<string, number>;
+      plannedCardPackDifficultyByFloor?: Record<string, string>;
+      plannedFloorRowCount?: number;
+      checkedEgoGiftIds?: number[];
+    } = {};
     if (existing) {
       try {
         parsed = JSON.parse(existing.searchJson) || {};
@@ -939,11 +1430,15 @@ export default function FavoritesPage() {
     const titleToSave = trimmed || (parsed.title ?? "").trim() || "(제목 없음)";
     const merged = {
       title: titleToSave,
-      egogiftIds: isCardPack ? (Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds : []) : starredEgoGiftIds,
-      cardPackIds: isCardPack ? starredCardPackIds : (Array.isArray(parsed.cardPackIds) ? parsed.cardPackIds : []),
+      egogiftIds: starredEgoGiftIds,
+      cardPackIds: starredCardPackIds,
       cardPackDifficulty: resultCardPackDifficulty,
       cardPackCheckedByFloor: Object.fromEntries(Object.entries(checkedCardPackByFloor).map(([k, v]) => [String(k), v])),
-      checkedEgoGiftIds: isCardPack ? (Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []) : checkedEgoGiftIds,
+      plannedCardPackDifficultyByFloor: Object.fromEntries(
+        Object.entries(plannedCardPackDifficultyByFloor).map(([k, v]) => [String(k), v])
+      ),
+      plannedFloorRowCount: v2PlannedFloorRowCount,
+      checkedEgoGiftIds: checkedEgoGiftIds,
     };
     const payload = { searchJson: JSON.stringify(merged) };
     setRegistering(true);
@@ -968,7 +1463,54 @@ export default function FavoritesPage() {
     } finally {
       setRegistering(false);
     }
-  };
+  }, [
+    selectedFavoriteId,
+    items,
+    titleInput,
+    starredEgoGiftIds,
+    starredCardPackIds,
+    resultCardPackDifficulty,
+    checkedCardPackByFloor,
+    plannedCardPackDifficultyByFloor,
+    v2PlannedFloorRowCount,
+    checkedEgoGiftIds,
+    fetchFavorites,
+  ]);
+
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+
+  const prevTabForV2AutosaveRef = useRef(activeTab);
+  useEffect(() => {
+    if (prevTabForV2AutosaveRef.current !== "result" && activeTab === "result") {
+      v2AutosaveSkipNextRef.current = true;
+    }
+    prevTabForV2AutosaveRef.current = activeTab;
+  }, [activeTab]);
+
+  /** 스키마 v2 이상 + 결과 탭: 층별 카드팩·에고기프트 목록 등 변경 시 자동 저장 (handleSave는 ref로 호출해 저장 후 items 갱신으로 재트리거 방지) */
+  useEffect(() => {
+    if (!favoriteSchemaV2OrHigher || activeTab !== "result" || selectedFavoriteId == null) return;
+    if (v2AutosaveSkipNextRef.current) {
+      v2AutosaveSkipNextRef.current = false;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void handleSaveRef.current();
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [
+    favoriteSchemaV2OrHigher,
+    activeTab,
+    selectedFavoriteId,
+    checkedCardPackByFloor,
+    starredCardPackIds,
+    plannedCardPackDifficultyByFloor,
+    v2PlannedFloorRowCount,
+    starredEgoGiftIds,
+    checkedEgoGiftIds,
+    resultCardPackDifficulty,
+  ]);
 
   const startEditTitle = (e: React.MouseEvent, item: { favoriteId: number; searchJson: string }) => {
     e.stopPropagation();
@@ -1138,8 +1680,11 @@ export default function FavoritesPage() {
           cardPackIds?: number[];
           cardPackDifficulty?: string;
           cardPackCheckedByFloor?: Record<string, number>;
+          plannedCardPackDifficultyByFloor?: Record<string, string>;
+          plannedFloorRowCount?: number;
           checkedEgoGiftIds?: number[];
         };
+        v2AutosaveSkipNextRef.current = true;
         setSelectedFavoriteId(data.data.favoriteId);
         const importedTitle = (parsed.title ?? "").trim();
         setTitleInput(importedTitle ? getUniqueReportTitle(importedTitle, updatedItems) : "");
@@ -1150,6 +1695,8 @@ export default function FavoritesPage() {
           ? Object.fromEntries(Object.entries(parsed.cardPackCheckedByFloor).map(([k, v]) => [Number(k), v]).filter(([k]) => !Number.isNaN(k)))
           : {};
         setCheckedCardPackByFloor(byFloor as Record<number, number>);
+        setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
+        setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
         setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
         setSaveToastState("visible");
         setToastSlideDown(true);
@@ -1186,6 +1733,8 @@ export default function FavoritesPage() {
           setStarredCardPackIds([]);
           setResultCardPackDifficulty("노말");
           setCheckedCardPackByFloor({});
+          setPlannedCardPackDifficultyByFloor({});
+          setV2PlannedFloorRowCount(1);
           setCheckedEgoGiftIds([]);
         }
         await fetchFavorites();
@@ -1303,6 +1852,7 @@ export default function FavoritesPage() {
                     tabIndex={0}
                     onClick={() => {
                       if (deletingId === item.favoriteId || editingFavoriteId === item.favoriteId) return;
+                      v2AutosaveSkipNextRef.current = true;
                       setSelectedFavoriteId(item.favoriteId);
                       try {
                         const parsed = JSON.parse(item.searchJson) as {
@@ -1311,6 +1861,8 @@ export default function FavoritesPage() {
                           cardPackIds?: number[];
                           cardPackDifficulty?: string;
                           cardPackCheckedByFloor?: Record<string, number>;
+                          plannedCardPackDifficultyByFloor?: Record<string, string>;
+                          plannedFloorRowCount?: number;
                           checkedEgoGiftIds?: number[];
                         };
                         setTitleInput("");
@@ -1321,6 +1873,8 @@ export default function FavoritesPage() {
                           ? Object.fromEntries(Object.entries(parsed.cardPackCheckedByFloor).map(([k, v]) => [Number(k), v]).filter(([k]) => !Number.isNaN(k)))
                           : {};
                         setCheckedCardPackByFloor(byFloor as Record<number, number>);
+                        setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
+                        setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
                         setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
                       } catch {
                         setTitleInput("");
@@ -1328,6 +1882,8 @@ export default function FavoritesPage() {
                         setStarredCardPackIds([]);
                         setResultCardPackDifficulty("노말");
                         setCheckedCardPackByFloor({});
+                        setPlannedCardPackDifficultyByFloor({});
+                        setV2PlannedFloorRowCount(1);
                         setCheckedEgoGiftIds([]);
                       }
                     }}
@@ -1335,6 +1891,7 @@ export default function FavoritesPage() {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         if (deletingId === item.favoriteId || editingFavoriteId === item.favoriteId) return;
+                        v2AutosaveSkipNextRef.current = true;
                         setSelectedFavoriteId(item.favoriteId);
                         try {
                           const parsed = JSON.parse(item.searchJson) as {
@@ -1343,6 +1900,8 @@ export default function FavoritesPage() {
                             cardPackIds?: number[];
                             cardPackDifficulty?: string;
                             cardPackCheckedByFloor?: Record<string, number>;
+                            plannedCardPackDifficultyByFloor?: Record<string, string>;
+                            plannedFloorRowCount?: number;
                             checkedEgoGiftIds?: number[];
                           };
                           setTitleInput("");
@@ -1353,6 +1912,8 @@ export default function FavoritesPage() {
                             ? Object.fromEntries(Object.entries(parsed.cardPackCheckedByFloor).map(([k, v]) => [Number(k), v]).filter(([k]) => !Number.isNaN(k)))
                             : {};
                           setCheckedCardPackByFloor(byFloor as Record<number, number>);
+                          setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
+                          setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
                           setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
                         } catch {
                           setTitleInput("");
@@ -1360,6 +1921,8 @@ export default function FavoritesPage() {
                           setStarredCardPackIds([]);
                           setResultCardPackDifficulty("노말");
                           setCheckedCardPackByFloor({});
+                          setPlannedCardPackDifficultyByFloor({});
+                          setV2PlannedFloorRowCount(1);
                           setCheckedEgoGiftIds([]);
                         }
                       }
@@ -1386,6 +1949,9 @@ export default function FavoritesPage() {
                           className="flex-1 min-w-0 px-2 py-1 bg-[#1a1a1d] text-white rounded text-sm border border-[#b8860b]/30 focus:outline-none focus:ring-1 focus:ring-yellow-400 focus:ring-inset"
                           autoFocus
                         />
+                        <span className="shrink-0 text-xs text-gray-500 tabular-nums select-none" title="스키마 버전">
+                          ver. {item.schemaVersion ?? 1}
+                        </span>
                         <div className="shrink-0 flex items-center gap-1">
                           <button
                             type="button"
@@ -1406,7 +1972,12 @@ export default function FavoritesPage() {
                       </>
                     ) : (
                       <>
-                        <span className="min-w-0 truncate">{title}</span>
+                        <div className="min-w-0 flex-1 flex items-baseline gap-1.5 overflow-hidden">
+                          <span className="min-w-0 truncate">{title}</span>
+                          <span className="shrink-0 text-xs text-gray-500 tabular-nums select-none" title="스키마 버전">
+                            ver. {item.schemaVersion ?? 1}
+                          </span>
+                        </div>
                         <div className="shrink-0 flex items-center gap-0.5">
                           <button
                             type="button"
@@ -1471,7 +2042,7 @@ export default function FavoritesPage() {
       }}
     >
       {/* 캡처 시 버튼 영역 숨김 (이미지에 포함되지 않도록) */}
-      <style dangerouslySetInnerHTML={{ __html: ".keyword-capture-hex .exclude-from-capture { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; border: none !important; opacity: 0 !important; pointer-events: none !important; position: absolute !important; left: -9999px !important; }" }} />
+      <style dangerouslySetInnerHTML={{ __html: ".keyword-capture-hex .exclude-from-capture { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; border: none !important; opacity: 0 !important; pointer-events: none !important; position: absolute !important; left: -9999px !important; } .keyword-capture-hex [data-cardpack-title] { min-height: 3.5rem !important; padding-bottom: 0.375rem !important; } .keyword-capture-hex [data-cardpack-title] p:first-of-type { line-height: 1.5 !important; min-height: 3em !important; overflow: visible !important; }" }} />
       {/* 저장 완료 토스트: 최상단에서 내려왔다가 올라가는 안내 */}
       {saveToastState !== "hidden" && (
         <div
@@ -1671,27 +2242,6 @@ export default function FavoritesPage() {
                 </div>
               </div>
             )
-          ) : activeTab === "cardpack" ? (
-            selectedFavoriteId !== null ? (
-              <CardPackPageContent
-                slotAboveSearch={favoritesPanel}
-                embedded
-                starredCardPackIds={starredCardPackIds}
-                onStarClick={handleCardPackStarToggle}
-                openCardPackDetailRef={cardPackDetailOpenRef}
-              />
-            ) : (
-              <div className="flex flex-col lg:flex-row gap-6">
-                <div className="w-full lg:w-1/5 flex-shrink-0 order-1 lg:order-1 min-w-[240px]">
-                  {favoritesPanel}
-                </div>
-                <div className="flex-1 order-2 lg:order-2">
-                  <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
-                    <p className="text-gray-400">보고서를 생성/선택해주세요.</p>
-                  </div>
-                </div>
-              </div>
-            )
           ) : (
             <div className="flex flex-col lg:flex-row gap-6">
               <div className="w-full lg:w-1/5 flex-shrink-0 order-1 lg:order-1 min-w-[240px]">
@@ -1704,15 +2254,439 @@ export default function FavoritesPage() {
                       <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
                         <p className="text-gray-400">보고서를 생성/선택해주세요.</p>
                       </div>
-                    ) : resultEgoGiftsLoading ? (
+                    ) : (
+                      <>
+                        {selectedReportSchemaVersion === 2 && (
+                          <div ref={v2PlannedCardPacksSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 mb-4 overflow-visible pb-10">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#b8860b]/40 pb-3 mb-4">
+                              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={() => void captureV2PlannedCardPacksSectionAsImage()}
+                                  className="text-base md:text-lg font-semibold text-yellow-200/90 text-left cursor-pointer hover:text-yellow-100 hover:underline focus:outline-none focus:underline rounded px-0 py-0 min-w-0"
+                                  title="클릭 시 진행(예정) 카드팩 목록 영역 전체를 이미지로 저장"
+                                >
+                                  진행(예정) 카드팩 목록
+                                </button>
+                                <span className="relative inline-flex shrink-0 group">
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-500 bg-red-950/70 text-[11px] font-bold leading-none text-red-300 shadow-sm hover:bg-red-900/80 hover:text-red-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+                                    aria-label="진행 예정 카드팩 사용 안내"
+                                    aria-describedby="v2-planned-cardpack-help-tooltip"
+                                  >
+                                    ?
+                                  </button>
+                                  <div
+                                    id="v2-planned-cardpack-help-tooltip"
+                                    role="tooltip"
+                                    className="pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-[70] w-max max-w-[min(20rem,calc(100vw-3rem))] -translate-x-1/2 rounded-xl border border-[#b8860b]/50 bg-[#1a1a1f] px-3 py-2.5 text-left text-[11px] sm:text-xs leading-snug text-gray-200 shadow-[0_8px_24px_rgba(0,0,0,0.55)] opacity-0 transition-opacity duration-200 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible"
+                                  >
+                                    <div className="flex flex-col gap-2">
+                                      <p>1행 1~5층, 추가 시 2행 6~10층·3행 11~15층입니다.</p>
+                                      <p>각 층 칸을 눌러 출현 카드팩을 고릅니다.</p>
+                                      <p>
+                                        변경 후 상단 <strong className="text-yellow-200/90">저장</strong>을 눌러주세요.
+                                      </p>
+                                    </div>
+                                    {/* 말풍선 꼬리 */}
+                                    <span
+                                      className="absolute left-1/2 top-full -translate-x-1/2 -mt-px block h-0 w-0 border-x-[8px] border-x-transparent border-t-[8px] border-t-[#b8860b]/50"
+                                      aria-hidden
+                                    />
+                                    <span
+                                      className="absolute left-1/2 top-full -translate-x-1/2 mt-[-6px] block h-0 w-0 border-x-[7px] border-x-transparent border-t-[7px] border-t-[#1a1a1f]"
+                                      aria-hidden
+                                    />
+                                  </div>
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={addV2PlannedFloorRow}
+                                  disabled={v2PlannedFloorRowCount >= 3 || plannableCardPacksLoading || plannableCardPacks.length === 0}
+                                  className="px-2.5 py-1.5 text-xs sm:text-sm rounded border border-emerald-500/50 text-emerald-200 hover:bg-emerald-500/15 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+                                  title="6~10층 행 추가 (최대 11~15층까지)"
+                                >
+                                  층 행 추가
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={removeLastV2PlannedFloorRow}
+                                  disabled={v2PlannedFloorRowCount <= 1}
+                                  className="px-2.5 py-1.5 text-xs sm:text-sm rounded border border-rose-500/50 text-rose-200 hover:bg-rose-500/15 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+                                  title="마지막 층 행 삭제 (1행 1~5층은 유지)"
+                                >
+                                  마지막 행 삭제
+                                </button>
+                              </div>
+                            </div>
+                            {plannableCardPacksLoading ? (
+                              <p className="text-gray-400 text-sm mb-3">카드팩 목록을 불러오는 중…</p>
+                            ) : plannableCardPacks.length === 0 ? (
+                              <p className="text-gray-400 text-sm mb-3">카드팩 목록을 불러올 수 없습니다.</p>
+                            ) : null}
+                            <div className="min-h-[120px] rounded-lg border border-[#b8860b]/30 bg-[#0d0d0f]/50 p-3 md:p-3 lg:p-4 overflow-visible">
+                              <div className="w-full space-y-3 sm:space-y-4">
+                                {V2_FLOOR_ROWS.slice(0, v2PlannedFloorRowCount).map((rowFloors, rowIdx) => (
+                                  <div
+                                    key={rowIdx}
+                                    className="w-full grid grid-cols-5 gap-1.5 sm:gap-2 md:gap-2 lg:gap-3"
+                                  >
+                                    {rowFloors.map((floor) => {
+                                      const packId = checkedCardPackByFloor[floor];
+                                      const pack = packId
+                                        ? plannableCardPacks.find((p) => p.cardpackId === packId)
+                                        : undefined;
+                                      const slotDiff = pack ? plannedCardPackDifficultyByFloor[floor] : undefined;
+                                      const borderCls =
+                                        pack && slotDiff
+                                          ? v2SlotBorderClass(slotDiff)
+                                          : "border-[#b8860b]/50 hover:border-yellow-400/60";
+                                      const floorTitle =
+                                        pack && slotDiff
+                                          ? `${floor}층 - ${v2DifficultySlotLabel(slotDiff)}`
+                                          : `${floor}층`;
+                                      const slotDisabled = plannableCardPacksLoading || plannableCardPacks.length === 0;
+                                      return (
+                                        <div
+                                          key={floor}
+                                          role="button"
+                                          tabIndex={slotDisabled ? -1 : 0}
+                                          onClick={() => {
+                                            if (slotDisabled) return;
+                                            setV2FloorModalFloor(floor);
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (slotDisabled) return;
+                                            if (e.key === "Enter" || e.key === " ") {
+                                              e.preventDefault();
+                                              setV2FloorModalFloor(floor);
+                                            }
+                                          }}
+                                          className={`flex flex-col items-stretch rounded-lg border bg-[#131316]/80 transition-colors text-left min-h-[180px] sm:min-h-[200px] md:min-h-[220px] lg:min-h-[240px] outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] ${
+                                            slotDisabled ? "opacity-50 cursor-not-allowed pointer-events-none" : "cursor-pointer"
+                                          } ${borderCls}`}
+                                        >
+                                          <span className="text-center text-xs sm:text-sm md:text-base font-semibold text-yellow-200/90 py-1.5 md:py-2 border-b border-[#b8860b]/30 bg-[#131316] shrink-0 px-1 leading-tight">
+                                            {floorTitle}
+                                          </span>
+                                          <div className="relative flex-1 flex flex-col items-center justify-center p-1.5 min-h-[140px] sm:min-h-[160px] md:min-h-[170px]">
+                                            {plannableCardPacksLoading ? (
+                                              <span className="text-gray-500 text-sm text-center">…</span>
+                                            ) : pack ? (
+                                              <>
+                                                <div className="aspect-[1/2] w-full max-w-[3.5rem] sm:max-w-[4.25rem] md:max-w-none mx-auto rounded overflow-hidden bg-[#1a1a1a] mb-1 shrink-0">
+                                                  {pack.thumbnail ? (
+                                                    <img
+                                                      src={RESULT_EGOGIFT_BASE_URL + pack.thumbnail}
+                                                      alt=""
+                                                      className="w-full h-full object-cover"
+                                                      onError={(e) => {
+                                                        (e.target as HTMLImageElement).style.display = "none";
+                                                      }}
+                                                    />
+                                                  ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 px-0.5 text-center">
+                                                      없음
+                                                    </div>
+                                                  )}
+                                                </div>
+                                                <p className="text-[10px] sm:text-xs md:text-sm text-gray-200 line-clamp-2 text-center leading-snug w-full mt-0.5">
+                                                  {pack.title}
+                                                </p>
+                                                {!slotDisabled && (
+                                                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center exclude-from-capture">
+                                                    <button
+                                                      type="button"
+                                                      className="pointer-events-auto rounded-full bg-black/55 p-1.5 sm:p-2 text-white shadow-lg border border-white/25 hover:bg-black/75 hover:scale-105 active:scale-95 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/80 z-10 exclude-from-capture"
+                                                      title="카드팩 정보"
+                                                      aria-label={`${pack.title} 카드팩 정보 보기`}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        cardPackDetailOpenRef.current?.open(pack.cardpackId);
+                                                      }}
+                                                    >
+                                                      <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        className="w-4 h-4 sm:w-[1.15rem] sm:h-[1.15rem]"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                        strokeWidth={2}
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        aria-hidden
+                                                      >
+                                                        <circle cx="11" cy="11" r="8" />
+                                                        <path d="m21 21-4.35-4.35" />
+                                                      </svg>
+                                                    </button>
+                                                  </div>
+                                                )}
+                                              </>
+                                            ) : (
+                                              <span className="text-gray-500 text-xs sm:text-sm text-center px-1 leading-snug">
+                                                비어 있음
+                                                <br />
+                                                <span className="text-gray-600 text-[11px] sm:text-xs">탭하여 선택</span>
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            {portalMounted &&
+                              v2FloorModalFloor != null &&
+                              createPortal(
+                                <div
+                                  className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-black/75"
+                                  role="dialog"
+                                  aria-modal="true"
+                                  aria-labelledby="v2-floor-modal-title"
+                                  onClick={() => setV2FloorModalFloor(null)}
+                                >
+                                  <div
+                                    className="relative w-full max-w-3xl max-h-[min(90vh,720px)] flex flex-col rounded-xl border border-[#b8860b]/50 bg-[#131316] shadow-xl overflow-hidden"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <div className="flex items-start justify-between gap-2 px-4 py-3 border-b border-[#b8860b]/40 shrink-0">
+                                      <div>
+                                        <h4 id="v2-floor-modal-title" className="text-lg font-semibold text-yellow-200">
+                                          {v2FloorModalFloor}층 출현 카드팩
+                                        </h4>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                          난이도를 고른 뒤 카드팩을 선택하세요.
+                                        </p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => setV2FloorModalFloor(null)}
+                                        className="shrink-0 px-2 py-1 text-gray-400 hover:text-white rounded border border-transparent hover:border-[#b8860b]/40"
+                                        aria-label="닫기"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                    <div className="px-4 py-2 border-b border-[#b8860b]/25 flex flex-wrap items-center gap-2 shrink-0">
+                                      <span className="text-xs text-gray-500 mr-1">난이도</span>
+                                      {(["노말", "하드", "익스트림"] as const).map((d) => (
+                                        <button
+                                          key={d}
+                                          type="button"
+                                          onClick={() => setV2ModalDifficulty(d)}
+                                          className={`px-2.5 py-1 text-xs rounded border transition-colors ${
+                                            v2ModalDifficulty === d
+                                              ? "border-amber-400/70 bg-amber-500/20 text-amber-200"
+                                              : "border-[#b8860b]/35 text-gray-400 hover:bg-white/5"
+                                          }`}
+                                        >
+                                          {d === "익스트림" ? "평행중첩" : d}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    {resultEgoGifts.some((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0) ? (
+                                      <p className="text-[11px] sm:text-xs text-amber-200/85 px-4 py-1.5 border-b border-amber-500/20 bg-amber-500/5 leading-snug">
+                                        <span className="text-amber-400 font-bold" aria-hidden>
+                                          ●
+                                        </span>{" "}
+                                        호박색 테두리: 이 보고서 즐겨찾기 중{" "}
+                                        <strong className="text-amber-100/90">한정</strong> 에고기프트가 이 층·난이도에서 출현할 수 있는 카드팩입니다.
+                                      </p>
+                                    ) : null}
+                                    <div className="px-4 py-2 border-b border-[#b8860b]/20 shrink-0">
+                                      <label htmlFor="v2-modal-pack-search" className="sr-only">
+                                        카드팩 제목 검색
+                                      </label>
+                                      <input
+                                        id="v2-modal-pack-search"
+                                        type="search"
+                                        value={v2ModalTitleSearch}
+                                        onChange={(e) => setV2ModalTitleSearch(e.target.value)}
+                                        placeholder="제목으로 검색…"
+                                        className="w-full px-3 py-2 text-sm rounded border border-[#b8860b]/35 bg-[#0d0d0f] text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-400/40 focus:border-yellow-400/50"
+                                      />
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
+                                      {v2ModalDisplayPacks.length === 0 ? (
+                                        <p className="text-gray-500 text-sm text-center py-8">
+                                          {v2ModalFilteredPacks.length === 0
+                                            ? `이 조건에서 ${v2FloorModalFloor}층에 출현하는 카드팩이 없습니다.`
+                                            : "검색어에 맞는 카드팩이 없습니다."}
+                                        </p>
+                                      ) : (
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                          {v2ModalDisplayPacks.map((cp) => {
+                                            const currentId = checkedCardPackByFloor[v2FloorModalFloor];
+                                            const isCurrent = currentId === cp.cardpackId;
+                                            const hasLimitedHighlight = v2ModalLimitedIdSet.has(cp.cardpackId);
+                                            const cardSurfaceClass = isCurrent
+                                              ? "border-yellow-400 ring-2 ring-yellow-400/30 bg-[#1a1810]"
+                                              : hasLimitedHighlight
+                                                ? "border-amber-400/85 ring-2 ring-amber-400/40 bg-[#1a1408] hover:border-amber-300 hover:ring-amber-300/50"
+                                                : "border-[#b8860b]/40 bg-[#0d0d0f] hover:border-[#d4af37]/60";
+                                            return (
+                                              <button
+                                                key={cp.cardpackId}
+                                                type="button"
+                                                onClick={() =>
+                                                  commitV2FloorSelection(v2FloorModalFloor, cp.cardpackId, v2ModalDifficulty)
+                                                }
+                                                className={`relative rounded-lg border flex flex-col text-left overflow-hidden transition-all focus:outline-none focus:ring-2 focus:ring-yellow-400/50 ${cardSurfaceClass}`}
+                                              >
+                                                {hasLimitedHighlight ? (
+                                                  <span className="absolute top-1 right-1 z-10 px-1 py-0.5 rounded bg-amber-500 text-black text-[9px] sm:text-[10px] font-bold leading-none shadow-md pointer-events-none">
+                                                    한정
+                                                  </span>
+                                                ) : null}
+                                                <div className="aspect-[1/2] w-full bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
+                                                  {cp.thumbnail ? (
+                                                    <img
+                                                      src={RESULT_EGOGIFT_BASE_URL + cp.thumbnail}
+                                                      alt=""
+                                                      className="w-full h-full object-cover"
+                                                      onError={(e) => {
+                                                        (e.target as HTMLImageElement).style.display = "none";
+                                                      }}
+                                                    />
+                                                  ) : (
+                                                    <span className="text-gray-500 text-xs px-1 text-center">이미지 없음</span>
+                                                  )}
+                                                </div>
+                                                <div className="px-2 py-2">
+                                                  <p className="text-gray-200 text-xs font-medium line-clamp-2 leading-snug">{cp.title}</p>
+                                                </div>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="px-4 py-3 border-t border-[#b8860b]/40 flex flex-wrap gap-2 justify-end shrink-0 bg-[#0f0f12]">
+                                      {checkedCardPackByFloor[v2FloorModalFloor] != null && (
+                                        <button
+                                          type="button"
+                                          onClick={() => commitV2FloorSelection(v2FloorModalFloor, null)}
+                                          className="px-3 py-2 text-sm rounded border border-red-400/50 text-red-200 hover:bg-red-500/10"
+                                        >
+                                          이 층 선택 해제
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => setV2FloorModalFloor(null)}
+                                        className="px-3 py-2 text-sm rounded bg-[#2a2a2d] text-gray-200 border border-[#b8860b]/40 hover:bg-[#333338]"
+                                      >
+                                        닫기
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>,
+                                document.body
+                              )}
+                            <div className="mt-4 pt-4 border-t border-[#b8860b]/30">
+                              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                  <h4 className="text-sm font-semibold text-yellow-200/80">놓친 한정 에고기프트 출현 카드팩</h4>
+                                  <span className="relative group shrink-0">
+                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#b8860b]/50 text-[#b8860b]/80 text-xs font-bold cursor-help">
+                                      ?
+                                    </span>
+                                    <span className="absolute left-0 top-full mt-1.5 z-10 px-3 py-2 w-72 max-w-[min(18rem,calc(100vw-2rem))] text-xs text-gray-200 bg-[#1a1a1d] border border-[#b8860b]/40 rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity pointer-events-none">
+                                      선택한 에고기프트 중 한정 카드팩에서 출연하지만 해당 카드팩이 진행 예정 슬롯에 저장되지 않은 경우 아래에 표시됩니다. (노말·하드·익스트림 전 층 기준)
+                                    </span>
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setMissedLimitedCardPacksExpanded((v) => !v)}
+                                  className="shrink-0 p-1 rounded text-yellow-200/80 hover:text-yellow-100 hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
+                                  aria-expanded={missedLimitedCardPacksExpanded}
+                                  title={missedLimitedCardPacksExpanded ? "놓친 한정 카드팩 목록 접기" : "놓친 한정 카드팩 목록 펼치기"}
+                                  aria-label={missedLimitedCardPacksExpanded ? "접기" : "펼치기"}
+                                >
+                                  <span
+                                    className={`inline-block transition-transform duration-200 ${missedLimitedCardPacksExpanded ? "rotate-90" : ""}`}
+                                    aria-hidden
+                                  >
+                                    ▶
+                                  </span>
+                                </button>
+                              </div>
+                              {missedLimitedCardPacksExpanded && (
+                              <>
+                              {resultLimitedEgoGiftCardPacksLoading ? (
+                                <p className="text-gray-400 text-sm">불러오는 중...</p>
+                              ) : resultLimitedEgoGiftCardPacks.length === 0 ? (
+                                <p className="text-gray-500 text-sm">해당 조건에 한정 에고기프트가 출현하는 카드팩이 없습니다.</p>
+                              ) : (
+                                <div className="grid grid-cols-2 gap-3 md:grid-cols-5 md:gap-2 lg:gap-3 xl:gap-4 grid-auto-rows-[minmax(15rem,auto)] md:grid-auto-rows-[minmax(13rem,auto)] xl:grid-auto-rows-[minmax(17rem,auto)]">
+                                  {[...resultLimitedEgoGiftCardPacks]
+                                    .sort((a, b) => {
+                                      const floorsA = getFloorsWhereCardPackChecked(a.cardpackId);
+                                      const floorsB = getFloorsWhereCardPackChecked(b.cardpackId);
+                                      const minA = floorsA.length > 0 ? Math.min(...floorsA) : 999;
+                                      const minB = floorsB.length > 0 ? Math.min(...floorsB) : 999;
+                                      return minA - minB;
+                                    })
+                                    .map((pack) => (
+                                      <div
+                                        key={pack.cardpackId}
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={() => cardPackDetailOpenRef.current?.open(pack.cardpackId)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            cardPackDetailOpenRef.current?.open(pack.cardpackId);
+                                          }
+                                        }}
+                                        className="relative rounded border border-amber-500/40 bg-[#131316]/80 flex flex-col cursor-pointer hover:ring-2 hover:ring-amber-400/50 transition-all"
+                                      >
+                                        <div className="aspect-[1/2] w-full flex-shrink-0 bg-[#1a1a1a] flex items-center justify-center overflow-hidden rounded-t">
+                                          {pack.thumbnail ? (
+                                            <img
+                                              src={RESULT_EGOGIFT_BASE_URL + pack.thumbnail}
+                                              alt={pack.title}
+                                              className="w-full h-full object-cover"
+                                              onError={(e) => {
+                                                (e.target as HTMLImageElement).style.display = "none";
+                                              }}
+                                            />
+                                          ) : (
+                                            <span className="text-gray-500 text-[10px] md:text-xs">이미지 없음</span>
+                                          )}
+                                        </div>
+                                        <div className="px-1.5 pt-1.5 pb-1 text-center min-h-0 flex-shrink-0 flex flex-col justify-center rounded-b overflow-visible md:px-1.5 md:pt-1 md:pb-1 xl:px-2 xl:pt-2 xl:pb-1.5" data-cardpack-title>
+                                          <p className="text-gray-200 text-xs font-medium break-words leading-snug h-[2.7em] overflow-hidden md:text-[11px] md:leading-tight md:h-[2.65em] xl:text-sm xl:leading-[1.5] xl:h-[3em]">
+                                            {pack.title}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              )}
+                              </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {resultEgoGiftsLoading ? (
                       <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
                         <p className="text-gray-400">불러오는 중...</p>
                       </div>
                     ) : starredEgoGiftIds.length === 0 && starredCardPackIds.length === 0 ? (
                       <div className="space-y-4">
+                        {selectedReportSchemaVersion !== 2 && (
                         <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
-                          <p className="text-gray-400">저장된 카드팩이 없습니다. 카드팩 탭에서 별을 눌러 추가해보세요.</p>
+                          <p className="text-gray-400">이 보고서에 등록된 카드팩이 없습니다.</p>
                         </div>
+                        )}
                         <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
                           <p className="text-gray-400">저장된 에고기프트가 없습니다. 에고기프트 탭에서 별을 눌러 추가해보세요.</p>
                         </div>
@@ -1723,12 +2697,14 @@ export default function FavoritesPage() {
                       </div>
                     ) : (
                       <>
+                      {selectedReportSchemaVersion !== 2 && (
+                      <>
                       {starredCardPackIds.length === 0 ? (
                         <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6 mb-4">
-                          <p className="text-gray-400">저장된 카드팩이 없습니다. 카드팩 탭에서 별을 눌러 추가해보세요.</p>
+                          <p className="text-gray-400">이 보고서에 등록된 카드팩이 없습니다.</p>
                         </div>
                       ) : (
-                      <div ref={starredCardPacksSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 mb-4">
+                      <div ref={starredCardPacksSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 mb-4 overflow-visible pb-10">
                         <div className="flex flex-wrap items-center gap-2 border-b border-[#b8860b]/40 pb-3 mb-3">
                           <button
                             type="button"
@@ -1786,7 +2762,10 @@ export default function FavoritesPage() {
                             <span className="w-px h-5 bg-[#b8860b]/40 shrink-0 ml-0.5" aria-hidden />
                             <button
                               type="button"
-                              onClick={() => setCheckedCardPackByFloor({})}
+                              onClick={() => {
+                                setCheckedCardPackByFloor({});
+                                setPlannedCardPackDifficultyByFloor({});
+                              }}
                               disabled={Object.keys(checkedCardPackByFloor).length === 0}
                               className="px-2 py-1 text-xs rounded border border-cyan-400 bg-cyan-400/25 text-cyan-200 hover:bg-cyan-400/35 hover:text-cyan-100 transition-colors shadow-[0_0_12px_rgba(34,211,238,0.25)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-cyan-400/25 disabled:hover:text-cyan-200"
                               title="층별 선택 초기화"
@@ -1795,12 +2774,12 @@ export default function FavoritesPage() {
                             </button>
                           </div>
                         </div>
-                        <div className={resultStarredCardPacks.length === 0 && !resultStarredCardPacksLoading ? "" : "min-h-[120px] rounded-lg border border-[#b8860b]/30 bg-[#0d0d0f]/50 p-4"}>
+                        <div className={resultStarredCardPacks.length === 0 && !resultStarredCardPacksLoading ? "" : "min-h-[120px] rounded-lg border border-[#b8860b]/30 bg-[#0d0d0f]/50 p-4 overflow-visible"}>
                           {resultStarredCardPacksLoading ? (
                             <p className="text-gray-400 text-sm">불러오는 중...</p>
                           ) : resultStarredCardPacks.length === 0 ? (
                             <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
-                              <p className="text-gray-400">저장된 카드팩이 없습니다. 카드팩 탭에서 별을 눌러 추가해보세요.</p>
+                              <p className="text-gray-400">이 보고서에 등록된 카드팩이 없습니다.</p>
                             </div>
                           ) : (() => {
                             const allowedByDifficulty: Record<string, string[]> = {
@@ -1838,14 +2817,14 @@ export default function FavoritesPage() {
                                   tabIndex={0}
                                   onClick={() => cardPackDetailOpenRef.current?.open(pack.cardpackId)}
                                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cardPackDetailOpenRef.current?.open(pack.cardpackId); } }}
-                                  className="relative rounded border border-[#b8860b]/40 bg-[#131316]/80 overflow-hidden flex flex-col cursor-pointer hover:ring-2 hover:ring-yellow-400/50 transition-all"
+                                  className="relative rounded border border-[#b8860b]/40 bg-[#131316]/80 flex flex-col cursor-pointer hover:ring-2 hover:ring-yellow-400/50 transition-all"
                                 >
-                                  <div className="aspect-[3/4] flex-shrink-0 bg-[#1a1a1a] flex items-center justify-center">
+                                  <div className="aspect-[1/2] w-full flex-shrink-0 bg-[#1a1a1a] flex items-center justify-center overflow-hidden rounded-t">
                                     {pack.thumbnail ? (
                                       <img
                                         src={RESULT_EGOGIFT_BASE_URL + pack.thumbnail}
                                         alt={pack.title}
-                                        className="w-full h-full object-contain"
+                                        className="w-full h-full object-cover"
                                         onError={(e) => {
                                           (e.target as HTMLImageElement).style.display = "none";
                                         }}
@@ -1854,12 +2833,12 @@ export default function FavoritesPage() {
                                       <span className="text-gray-500 text-xs">이미지 없음</span>
                                     )}
                                   </div>
-                                  <div className="p-2 text-center">
-                                    <p className="text-gray-200 text-sm font-medium break-words line-clamp-2">{pack.title}</p>
+                                  <div className="px-2 pt-2 pb-1.5 text-center min-h-0 flex-shrink-0 flex flex-col justify-center rounded-b overflow-visible" data-cardpack-title>
+                                    <p className="text-gray-200 text-sm font-medium break-words leading-[1.5] h-[3em] overflow-hidden">{pack.title}</p>
                                     {resultCardPackFloor == null && (() => {
                                       const floors = getFloorsWhereCardPackChecked(pack.cardpackId);
                                       return floors.length > 0 ? (
-                                        <p className="text-yellow-400/90 text-xs mt-0.5">
+                                        <p className="text-yellow-400/90 text-xs mt-0">
                                           {floors.length === 1 ? `${floors[0]}층에서 선택됨` : `${floors.join(", ")}층에서 선택됨`}
                                         </p>
                                       ) : null;
@@ -1886,21 +2865,40 @@ export default function FavoritesPage() {
                         </div>
                         {resultCardPackDifficulty != null && (
                           <div className="mt-6 pt-4 border-t border-[#b8860b]/30">
-                            <div className="flex items-center gap-1.5 mb-2">
-                              <h4 className="text-sm font-semibold text-yellow-200/80">놓친 한정 에고기프트 출현 카드팩</h4>
-                              <span className="relative group">
-                                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#b8860b]/50 text-[#b8860b]/80 text-xs font-bold cursor-help">?</span>
-                                <span className="absolute left-0 top-full mt-1.5 z-10 px-3 py-2 w-72 text-xs text-gray-200 bg-[#1a1a1d] border border-[#b8860b]/40 rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity pointer-events-none">
-                                  선택한 에고기프트 중 한정 카드팩에서 출연하지만 해당 카드팩이 선택 목록에 저장되지 않은 경우 아래 영역에 표시됩니다.
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                <h4 className="text-sm font-semibold text-yellow-200/80">놓친 한정 에고기프트 출현 카드팩</h4>
+                                <span className="relative group shrink-0">
+                                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#b8860b]/50 text-[#b8860b]/80 text-xs font-bold cursor-help">?</span>
+                                  <span className="absolute left-0 top-full mt-1.5 z-10 px-3 py-2 w-72 text-xs text-gray-200 bg-[#1a1a1d] border border-[#b8860b]/40 rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity pointer-events-none">
+                                    선택한 에고기프트 중 한정 카드팩에서 출연하지만 해당 카드팩이 선택 목록에 저장되지 않은 경우 아래 영역에 표시됩니다.
+                                  </span>
                                 </span>
-                              </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setMissedLimitedCardPacksExpanded((v) => !v)}
+                                className="shrink-0 p-1 rounded text-yellow-200/80 hover:text-yellow-100 hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
+                                aria-expanded={missedLimitedCardPacksExpanded}
+                                title={missedLimitedCardPacksExpanded ? "놓친 한정 카드팩 목록 접기" : "놓친 한정 카드팩 목록 펼치기"}
+                                aria-label={missedLimitedCardPacksExpanded ? "접기" : "펼치기"}
+                              >
+                                <span
+                                  className={`inline-block transition-transform duration-200 ${missedLimitedCardPacksExpanded ? "rotate-90" : ""}`}
+                                  aria-hidden
+                                >
+                                  ▶
+                                </span>
+                              </button>
                             </div>
+                            {missedLimitedCardPacksExpanded && (
+                            <>
                             {resultLimitedEgoGiftCardPacksLoading ? (
                               <p className="text-gray-400 text-sm">불러오는 중...</p>
                             ) : resultLimitedEgoGiftCardPacks.length === 0 ? (
                               <p className="text-gray-500 text-sm">해당 조건에 한정 에고기프트가 출현하는 카드팩이 없습니다.</p>
                             ) : (
-                              <div className="grid grid-cols-2 min-[500px]:grid-cols-3 min-[770px]:grid-cols-4 lg:grid-cols-5 gap-4">
+                              <div className="grid grid-cols-2 gap-3 md:grid-cols-5 md:gap-2 lg:gap-3 xl:gap-4 grid-auto-rows-[minmax(15rem,auto)] md:grid-auto-rows-[minmax(13rem,auto)] xl:grid-auto-rows-[minmax(17rem,auto)]">
                                 {(resultCardPackFloor == null
                                   ? [...resultLimitedEgoGiftCardPacks].sort((a, b) => {
                                       const floorsA = getFloorsWhereCardPackChecked(a.cardpackId);
@@ -1917,28 +2915,28 @@ export default function FavoritesPage() {
                                     tabIndex={0}
                                     onClick={() => cardPackDetailOpenRef.current?.open(pack.cardpackId)}
                                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cardPackDetailOpenRef.current?.open(pack.cardpackId); } }}
-                                    className="relative rounded border border-amber-500/40 bg-[#131316]/80 overflow-hidden flex flex-col cursor-pointer hover:ring-2 hover:ring-amber-400/50 transition-all"
+                                    className="relative rounded border border-amber-500/40 bg-[#131316]/80 flex flex-col cursor-pointer hover:ring-2 hover:ring-amber-400/50 transition-all"
                                   >
-                                    <div className="aspect-[3/4] flex-shrink-0 bg-[#1a1a1a] flex items-center justify-center">
+                                    <div className="aspect-[1/2] w-full flex-shrink-0 bg-[#1a1a1a] flex items-center justify-center overflow-hidden rounded-t">
                                       {pack.thumbnail ? (
                                         <img
                                           src={RESULT_EGOGIFT_BASE_URL + pack.thumbnail}
                                           alt={pack.title}
-                                          className="w-full h-full object-contain"
+                                          className="w-full h-full object-cover"
                                           onError={(e) => {
                                             (e.target as HTMLImageElement).style.display = "none";
                                           }}
                                         />
                                       ) : (
-                                        <span className="text-gray-500 text-xs">이미지 없음</span>
+                                        <span className="text-gray-500 text-[10px] md:text-xs">이미지 없음</span>
                                       )}
                                     </div>
-                                    <div className="p-2 text-center">
-                                      <p className="text-gray-200 text-sm font-medium break-words line-clamp-2">{pack.title}</p>
+                                    <div className="px-1.5 pt-1.5 pb-1 text-center min-h-0 flex-shrink-0 flex flex-col justify-center rounded-b overflow-visible md:px-1.5 md:pt-1 md:pb-1 xl:px-2 xl:pt-2 xl:pb-1.5" data-cardpack-title>
+                                      <p className="text-gray-200 text-xs font-medium break-words leading-snug h-[2.7em] overflow-hidden md:text-[11px] md:leading-tight md:h-[2.65em] xl:text-sm xl:leading-[1.5] xl:h-[3em]">{pack.title}</p>
                                       {resultCardPackFloor == null && (() => {
                                         const floors = getFloorsWhereCardPackChecked(pack.cardpackId);
                                         return floors.length > 0 ? (
-                                          <p className="text-amber-400/90 text-xs mt-0.5">
+                                          <p className="text-amber-400/90 text-xs mt-0">
                                             {floors.length === 1 ? `${floors[0]}층에서 선택됨` : `${floors.join(", ")}층에서 선택됨`}
                                           </p>
                                         ) : null;
@@ -1948,11 +2946,11 @@ export default function FavoritesPage() {
                                       <button
                                         type="button"
                                         onClick={(e) => { e.stopPropagation(); toggleCardPackCheck(pack.cardpackId); }}
-                                        className={`absolute top-2 right-2 w-9 h-9 rounded flex items-center justify-center transition-colors shadow-md border-2 border-blue-400 exclude-from-capture ${checkedCardPackByFloor[resultCardPackFloor] === pack.cardpackId ? "bg-blue-500 hover:bg-blue-600" : "bg-black/70 hover:bg-black/90"}`}
+                                        className={`absolute top-1.5 right-1.5 md:top-1 md:right-1 w-8 h-8 md:w-7 md:h-7 xl:top-2 xl:right-2 xl:w-9 xl:h-9 rounded flex items-center justify-center transition-colors shadow-md border-2 border-blue-400 exclude-from-capture ${checkedCardPackByFloor[resultCardPackFloor] === pack.cardpackId ? "bg-blue-500 hover:bg-blue-600" : "bg-black/70 hover:bg-black/90"}`}
                                         title={checkedCardPackByFloor[resultCardPackFloor] === pack.cardpackId ? "체크 해제" : "체크"}
                                         aria-label={checkedCardPackByFloor[resultCardPackFloor] === pack.cardpackId ? "체크 해제" : "체크"}
                                       >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className={`w-5 h-5 ${checkedCardPackByFloor[resultCardPackFloor] === pack.cardpackId ? "text-white" : "text-gray-600"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className={`w-4 h-4 md:w-3.5 md:h-3.5 xl:w-5 xl:h-5 ${checkedCardPackByFloor[resultCardPackFloor] === pack.cardpackId ? "text-white" : "text-gray-600"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                           <polyline points="20 6 9 17 4 12" />
                                         </svg>
                                       </button>
@@ -1961,9 +2959,13 @@ export default function FavoritesPage() {
                                 ))}
                               </div>
                             )}
+                            </>
+                            )}
                         </div>
                         )}
                       </div>
+                      )}
+                      </>
                       )}
                       {starredEgoGiftIds.length === 0 && (
                         <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6 mb-4">
@@ -2090,6 +3092,7 @@ export default function FavoritesPage() {
                             resultEgoGifts={resultEgoGifts}
                             checkedEgoGiftIds={checkedEgoGiftIds}
                             onToggleEgoGiftCheck={toggleEgoGiftCheck}
+                            onRemoveStarredEgoGift={removeStarredEgoGift}
                             sectionRef={(el) => { keywordSectionRefs.current[keyword] = el; }}
                             synthesisRef={(el) => { synthesisSectionRefs.current[keyword] = el; }}
                             onCaptureSection={captureSectionAsImage}
@@ -2098,6 +3101,8 @@ export default function FavoritesPage() {
                         )) }
                       </div>
                       )}
+                      </>
+                    )}
                       </>
                     )}
                   </div>

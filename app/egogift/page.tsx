@@ -8,6 +8,7 @@ import EgoGiftPreview from "@/app/dante/(admin)/egogift/components/EgoGiftPrevie
 import { HASHTAG_CATEGORIES } from "@/lib/hashtagCategories";
 import { keywordIconMap } from "@/lib/keywordParser";
 import { getOrCreateUUID, getUUID } from "@/lib/uuid";
+import { normalizeCurseBlessCd } from "@/lib/egogiftCurseBless";
 
 interface EgoGift {
   egogiftId: number;
@@ -22,6 +23,7 @@ interface EgoGift {
   grades?: string[];
   tagIds?: number[];
   synthesisYn?: string;
+  curseBlessCd?: string | null;
   limitedCategoryNames?: string[];
 }
 
@@ -35,6 +37,7 @@ interface EgoGiftDetail {
     cost: number;
     enhanceYn: string;
     synthesisYn?: string;  // 합성전용 여부
+    curseBlessCd?: string | null;
     desc1: string;
     desc2: string;
     desc3: string;
@@ -450,6 +453,7 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
           grades: item.grades || [],
           tagIds: item.tagIds || [],
           synthesisYn: item.synthesisYn ?? item.synthesis_yn,
+          curseBlessCd: normalizeCurseBlessCd(item.curseBlessCd ?? item.curse_bless_cd),
           limitedCategoryNames: Array.isArray(item.limitedCategoryNames) ? item.limitedCategoryNames : [],
         }));
         setAllEgoGiftsFull(items);
@@ -1697,6 +1701,10 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
           cost={String(egogiftPreviewData.egogift.cost)}
           enhanceYn={egogiftPreviewData.egogift.enhanceYn}
           synthesisYn={egogiftPreviewData.egogift.synthesisYn}
+          curseBlessCd={normalizeCurseBlessCd(
+            egogiftPreviewData.egogift.curseBlessCd ??
+              (egogiftPreviewData.egogift as { curse_bless_cd?: unknown }).curse_bless_cd
+          )}
           grades={egogiftPreviewData.egogift.grades || []}
           desc1={egogiftPreviewData.egogift.desc1 || ""}
           desc2={egogiftPreviewData.egogift.desc2 || ""}

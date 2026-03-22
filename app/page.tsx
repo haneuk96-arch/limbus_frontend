@@ -144,91 +144,39 @@ export default function Home() {
           </Link>
 
           {/* 카드팩 카드 */}
-          <Link 
+          <Link
             href="/cardpack"
             className="group relative overflow-hidden bg-[#131316] border-2 border-red-600/60 rounded-lg p-8 hover:border-yellow-400/80 transition-all duration-300 hover:shadow-[0_0_30px_rgba(255,204,51,0.3)] hover:scale-105"
           >
-            {/* 카드 배경 효과 */}
             <div className="absolute inset-0 bg-gradient-to-br from-red-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            
-            {/* 카드 내용 */}
             <div className="relative z-10">
-              {/* 아이콘 영역 */}
               <div className="flex justify-center mb-6">
                 <div className="w-24 h-24 bg-[#1a1a1a] rounded-full flex items-center justify-center border-2 border-red-600/60 group-hover:border-yellow-400/80 transition-colors duration-300">
-                  <svg 
-                    className="w-16 h-16 text-red-400 group-hover:text-yellow-400 transition-colors" 
-                    viewBox="0 0 64 64" 
+                  <svg
+                    className="w-16 h-16 text-red-400 group-hover:text-yellow-400 transition-colors"
+                    viewBox="0 0 64 64"
                     fill="none"
                   >
-                    {/* 왼쪽 카드 (뒤) - 약간 왼쪽으로 기울어짐 */}
                     <g transform="translate(32,32) rotate(-15) translate(-32,-32)">
-                      <rect 
-                        x="8" 
-                        y="10" 
-                        width="20" 
-                        height="28" 
-                        rx="2" 
-                        fill="currentColor" 
-                        opacity="0.5"
-                        stroke="currentColor"
-                        strokeWidth="1"
-                      />
+                      <rect x="8" y="10" width="20" height="28" rx="2" fill="currentColor" opacity="0.5" stroke="currentColor" strokeWidth="1" />
                     </g>
-                    {/* 가운데 카드 - 중심 */}
-                    <rect 
-                      x="22" 
-                      y="8" 
-                      width="20" 
-                      height="28" 
-                      rx="2" 
-                      fill="currentColor"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                    />
-                    {/* 오른쪽 카드 (앞) - 약간 오른쪽으로 기울어짐 */}
+                    <rect x="22" y="8" width="20" height="28" rx="2" fill="currentColor" stroke="currentColor" strokeWidth="1" />
                     <g transform="translate(32,32) rotate(15) translate(-32,-32)">
-                      <rect 
-                        x="36" 
-                        y="10" 
-                        width="20" 
-                        height="28" 
-                        rx="2" 
-                        fill="currentColor" 
-                        opacity="0.7"
-                        stroke="currentColor"
-                        strokeWidth="1"
-                      />
+                      <rect x="36" y="10" width="20" height="28" rx="2" fill="currentColor" opacity="0.7" stroke="currentColor" strokeWidth="1" />
                     </g>
                   </svg>
                 </div>
               </div>
-
-              {/* 제목 */}
               <h2 className="text-2xl md:text-3xl font-bold text-yellow-300 text-center mb-4 group-hover:text-yellow-400 transition-colors">
                 카드팩
               </h2>
-
-              {/* 설명 */}
               <p className="text-gray-300 text-center mb-6 leading-relaxed">
                 던전 카드팩을 검색하고 출현 에고기프트를 확인할 수 있습니다.
               </p>
-
-              {/* 화살표 아이콘 */}
               <div className="flex justify-center">
                 <div className="w-10 h-10 rounded-full bg-yellow-400/20 group-hover:bg-yellow-400/40 flex items-center justify-center transition-all duration-300 group-hover:translate-x-2">
-                  <svg 
-                    className="w-6 h-6 text-yellow-300 group-hover:text-yellow-400" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth={2} 
-                      d="M9 5l7 7-7 7" 
-                    />
+                  <svg className="w-6 h-6 text-yellow-300 group-hover:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </div>
               </div>
