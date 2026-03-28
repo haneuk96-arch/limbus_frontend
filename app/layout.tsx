@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+
+const GA_MEASUREMENT_ID = "G-9XX97XQY1L";
 import ConditionalHeader from "@/components/ConditionalHeader";
 import ConditionalFooter from "@/components/ConditionalFooter";
 
@@ -73,6 +76,18 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
           />
         </noscript>
         {/* End Google Tag Manager (noscript) */}
+        <Script
+          src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics-gtag" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', '${GA_MEASUREMENT_ID}');
+          `}
+        </Script>
         <ConditionalHeader />
         <main className="flex-1">
           {children}
