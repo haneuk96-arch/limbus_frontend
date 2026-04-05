@@ -9,6 +9,7 @@ import { HASHTAG_CATEGORIES } from "@/lib/hashtagCategories";
 import { keywordIconMap } from "@/lib/keywordParser";
 import { getOrCreateUUID, getUUID } from "@/lib/uuid";
 import { normalizeCurseBlessCd } from "@/lib/egogiftCurseBless";
+import { formatEgoGiftTierDisplay, normalizeGiftTierFromApi } from "@/lib/egoGiftTierDisplay";
 
 interface EgoGift {
   egogiftId: number;
@@ -71,10 +72,11 @@ interface EgoGiftDetail {
     eventType: number;  // 0: 일반, 1: 전투
   }>;
   limitedCategoryName?: string | null; // 한정 카테고리명 (레거시 호환용)
-  cardPackAppearances?: Array<{ // 출현하는 모든 카드팩 목록
-    cardpackId: number;
-    cardpackTitle: string;
-    categoryName: string | null;
+  cardPackAppearances?: Array<{
+    cardpackId?: number | null;
+    cardpackTitle?: string | null;
+    categoryName?: string | null;
+    thumbnailPath?: string | null;
   }>;
 }
 
@@ -447,7 +449,7 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
           keywordName: item.keywordName,
           keywordId: item.keywordId,
           attrKeywordId: item.attrKeywordId,
-          giftTier: item.giftTier,
+          giftTier: normalizeGiftTierFromApi(item.giftTier ?? item.gift_tier),
           cost: item.cost || 0,
           enhanceYn: item.enhanceYn || "",
           grades: item.grades || [],
@@ -746,6 +748,38 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
     }
   };
 
+  const applyEgoGiftDetailToPreview = async (data: EgoGiftDetail) => {
+    setEgoGiftPreviewData(data);
+    setEgoGiftPreviewOpen(true);
+    if (data.keyword) {
+      setKeywords([
+        {
+          keywordId: data.keyword.keywordId,
+          keywordName: data.keyword.keywordName,
+          categoryName: data.keyword.categoryName || "",
+        },
+      ]);
+    }
+    setPreviewHashtags(data.tags ?? []);
+    if (data.egogift?.egogiftId) {
+      try {
+        const recipeRes = await fetch(`${API_BASE_URL}/user/egogift/${data.egogift.egogiftId}/recipe`, {
+          credentials: "include",
+        });
+        if (recipeRes.ok) {
+          const recipeData = await recipeRes.json();
+          setEgoGiftRecipe(recipeData.recipes || []);
+        } else {
+          setEgoGiftRecipe(null);
+        }
+      } catch {
+        setEgoGiftRecipe(null);
+      }
+    } else {
+      setEgoGiftRecipe(null);
+    }
+  };
+
   const handleEgoGiftClick = async (giftName: string) => {
     try {
       const encodedName = encodeURIComponent(giftName);
@@ -754,31 +788,21 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
       });
       if (res.ok) {
         const data = await res.json();
-        
-        setEgoGiftPreviewData(data);
-        setEgoGiftPreviewOpen(true);
-        
-        if (data.keyword) {
-          setKeywords([{
-            keywordId: data.keyword.keywordId,
-            keywordName: data.keyword.keywordName,
-            categoryName: data.keyword.categoryName || "",
-          }]);
-        }
-        
-        if (data.egogift?.egogiftId) {
-          try {
-            const recipeRes = await fetch(`${API_BASE_URL}/user/egogift/${data.egogift.egogiftId}/recipe`, {
-              credentials: "include",
-            });
-            if (recipeRes.ok) {
-              const recipeData = await recipeRes.json();
-              setEgoGiftRecipe(recipeData.recipes || []);
-            }
-          } catch (err) {
-            setEgoGiftRecipe(null);
-          }
-        }
+        await applyEgoGiftDetailToPreview(data);
+      }
+    } catch (err) {
+      // 에러 처리
+    }
+  };
+
+  const handleEgoGiftClickById = async (egogiftId: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/egogift/${egogiftId}`, {
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await applyEgoGiftDetailToPreview(data);
       }
     } catch (err) {
       // 에러 처리
@@ -1601,20 +1625,13 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
                           )}
 
                           <div className="absolute top-1 -left-3 z-20 text-[#ffcc33] scale-x-[0.65] text-5xl drop-shadow-[0_0_5px_rgba(0,0,0,0.9)] select-none tracking-tight leading-none font-black">
-                            {(() => {
-                              const tier = egogift.giftTier != null ? String(egogift.giftTier).trim() : "";
-                              if (tier === "" || tier === "0") return "－";
-                              if (tier === "EX") return "EX";
-                              if (tier === "1") return "Ⅰ";
-                              if (tier === "2") return "Ⅱ";
-                              if (tier === "3") return "Ⅲ";
-                              if (tier === "4") return "Ⅳ";
-                              if (tier === "5") return "Ⅴ";
-                              return "－";
-                            })()}
+                            {formatEgoGiftTierDisplay(egogift.giftTier)}
                           </div>
 
-                          {egogift.keywordId && egogift.keywordId !== 0 && egogift.keywordName && (() => {
+                          {egogift.keywordId != null &&
+                            egogift.keywordId !== 0 &&
+                            egogift.keywordName &&
+                            (() => {
                             const iconMap: Record<string, string> = {
                               화상: "/images/keyword/Burn.webp",
                               출혈: "/images/keyword/Bleed.webp",
@@ -1715,12 +1732,14 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
           keywords={keywords}
           hashtags={previewHashtags}
           allKeywords={allKeywords}
+          allEgoGiftsForHighlight={allEgoGifts}
           egogiftId={egogiftPreviewData.egogift.egogiftId}
           recipes={egogiftRecipe}
           obtainableEvents={egogiftPreviewData?.obtainableEvents || []}
           limitedCategoryName={egogiftPreviewData?.limitedCategoryName || null}
           cardPackAppearances={egogiftPreviewData?.cardPackAppearances || []}
           onEgoGiftClick={(giftName) => handleEgoGiftClick(giftName)}
+          onEgoGiftClickById={handleEgoGiftClickById}
           onClose={closeEgoGiftModal}
         />,
         document.body

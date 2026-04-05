@@ -1,11 +1,16 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Montserrat } from "next/font/google";
 import KeywordHighlight from "@/components/KeywordHighlight";
+import type { CardPackHighlightEgoGift } from "@/components/CardPackDetailModal";
 import { KeywordData } from "@/lib/keywordParser";
 import { API_BASE_URL } from "@/lib/api";
 import { normalizeCurseBlessCd } from "@/lib/egogiftCurseBless";
+import { formatEgoGiftTierDisplay } from "@/lib/egoGiftTierDisplay";
+
+const CardPackDetailModal = dynamic(() => import("@/components/CardPackDetailModal"), { ssr: false });
 
 const montserrat = Montserrat({ 
   subsets: ["latin"], 
@@ -78,18 +83,23 @@ interface EgoGiftPreviewProps {
   keywords: Keyword[];
   hashtags: Hashtag[];
   allKeywords?: KeywordData[]; // 하이라이팅용 전체 키워드
+  /** 카드팩 상세 모달 내 이벤트/스크립트 하이라이트용 (없으면 빈 배열) */
+  allEgoGiftsForHighlight?: CardPackHighlightEgoGift[];
   egogiftId?: number; // 수정 버튼을 위한 ID
   recipes?: Recipe[] | null; // 조합식 데이터 (모든 조합식)
   obtainableEvents?: ObtainableEvent[]; // 획득 가능 이벤트 목록
   limitedCategoryName?: string | null; // 한정 카테고리명 (레거시 호환용)
   cardPackAppearances?: Array<{ // 출현하는 모든 카드팩 목록
-    cardpackId: number;
-    cardpackTitle: string;
-    categoryName: string | null;
+    cardpackId?: number | null;
+    cardpackTitle?: string | null;
+    categoryName?: string | null;
+    thumbnailPath?: string | null;
   }>;
   onClose: () => void;
   onEdit?: (id: number) => void; // 수정 버튼 클릭 핸들러
   onEgoGiftClick?: (giftName: string) => void; // 조합식의 에고기프트 클릭 핸들러
+  /** 카드팩 모달에서 에고 클릭 시 (있으면 API 한 번으로 열기; 없으면 onEgoGiftClick으로 이름 조회 시도) */
+  onEgoGiftClickById?: (egogiftId: number) => void;
 }
 
 export default function EgoGiftPreview({
@@ -111,6 +121,7 @@ export default function EgoGiftPreview({
   keywords,
   hashtags,
   allKeywords = [],
+  allEgoGiftsForHighlight = [],
   egogiftId,
   recipes,
   obtainableEvents = [],
@@ -119,20 +130,69 @@ export default function EgoGiftPreview({
   onClose,
   onEdit,
   onEgoGiftClick,
+  onEgoGiftClickById,
 }: EgoGiftPreviewProps) {
   const resolvedCurseBless = normalizeCurseBlessCd(curseBlessCd);
+  /** 한정 카드팩 영역: 기본 접힘 */
+  const [limitedCardPackOpen, setLimitedCardPackOpen] = useState(false);
+  const [cardPackModalId, setCardPackModalId] = useState<number | null>(null);
+  const cardPackModalOpenRef = useRef(false);
+  cardPackModalOpenRef.current = cardPackModalId != null;
 
-  // ESC 키로 모달 닫기
+  const hasLimitedCardPackInfo =
+    Boolean(cardPackAppearances && cardPackAppearances.length > 0) || Boolean(limitedCategoryName);
+
+  /** 에고기프트 제목 아래 한 줄: 출현 카드팩의 카테고리 한정, 없으면 레거시 카드팩 한정 */
+  const limitedCategoryUnderTitleLines = useMemo(() => {
+    const lines: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const a of cardPackAppearances) {
+      const c = a.categoryName?.trim();
+      if (c && !seen.has(c)) {
+        seen.add(c);
+        lines.push({ key: `cp-cat-${c}`, label: `"${c}" 카테고리 한정` });
+      }
+    }
+    if (lines.length === 0 && limitedCategoryName?.trim()) {
+      lines.push({
+        key: "legacy-limited",
+        label: `"${limitedCategoryName.trim()}" 카드팩 한정`,
+      });
+    }
+    return lines;
+  }, [cardPackAppearances, limitedCategoryName]);
+
+  const handleEgoGiftFromCardPackModal = (id: number) => {
+    setCardPackModalId(null);
+    if (onEgoGiftClickById) {
+      onEgoGiftClickById(id);
+      return;
+    }
+    if (!onEgoGiftClick) return;
+    void (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/egogift/${id}`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const name = data?.egogift?.giftName as string | undefined;
+        if (name) onEgoGiftClick(name);
+      } catch {
+        // ignore
+      }
+    })();
+  };
+
+  // ESC 키로 모달 닫기 (한정 카드팩 상세가 열려 있으면 CardPackDetailModal이 먼저 닫힘)
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
+      if (e.key !== "Escape") return;
+      if (cardPackModalOpenRef.current) return;
+      onClose();
     };
 
-    window.addEventListener('keydown', handleEscape);
+    window.addEventListener("keydown", handleEscape);
     return () => {
-      window.removeEventListener('keydown', handleEscape);
+      window.removeEventListener("keydown", handleEscape);
     };
   }, [onClose]);
 
@@ -153,6 +213,8 @@ export default function EgoGiftPreview({
   const selectedKeyword = keywords.find((k) => String(k.keywordId) === keywordId);
   const keywordName = selectedKeyword?.keywordName || "";
   const keywordIcon = keywordName ? iconMap[keywordName] : null;
+  const keywordIdTrimmed = keywordId.trim();
+  const showKeywordUi = keywordIdTrimmed !== "" && keywordIdTrimmed !== "0";
 
   // 속성 키워드 찾기 (attrKeywordId로)
   const attrKeyword = allKeywords.find((k) => k.keywordId === attrKeywordId);
@@ -174,9 +236,8 @@ export default function EgoGiftPreview({
     ? attrBgColorMap[attrKeywordName] 
     : "bg-[#0f0f0f]"; // 기본 배경색
 
-  const romanMap: Record<string, string> = { "1": "Ⅰ", "2": "Ⅱ", "3": "Ⅲ", "4": "Ⅳ", "5": "Ⅴ" };
-  const displayGrade = giftTier === "EX" ? "EX" : romanMap[giftTier || "1"] || "-";
-  const isEX = giftTier === "EX";
+  const displayGrade = formatEgoGiftTierDisplay(giftTier);
+  const isEX = String(giftTier ?? "").trim().toUpperCase() === "EX";
 
   const filteredHashtagTags = hashtags.filter((tag) => selectedTagIds.includes(tag.tagId));
   const hashtagChipClass =
@@ -189,7 +250,10 @@ export default function EgoGiftPreview({
   
   // 조합식 데이터는 각 조합식마다 개별적으로 처리
 
+  const baseUrl = API_BASE_URL.replace("/api", "");
+
   return (
+    <>
     <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-[9999] overflow-y-auto pt-20 pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" onClick={onClose}>
       <div className="bg-[#1b1b1b] border border-[#b8860b]/40 rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[calc(100vh-6rem)] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" onClick={(e) => e.stopPropagation()}>
         <div className={`sticky top-0 ${bgColorClass} border-b border-[#b8860b]/40 rounded-t-lg px-5 py-4 z-50 flex justify-between items-center backdrop-blur-sm`}>
@@ -234,7 +298,7 @@ export default function EgoGiftPreview({
                   >
                     {displayGrade}
                   </div>
-                  {keywordId && keywordId !== "0" && keywordIcon && (
+                  {showKeywordUi && keywordIcon && (
                     <div className="absolute bottom-[5px] right-[0px] w-9 h-9 z-20 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]">
                       <img src={keywordIcon} alt={keywordName} className="w-full h-full object-contain" />
                     </div>
@@ -273,24 +337,17 @@ export default function EgoGiftPreview({
                       {giftName || "미입력"}
                     </h2>
                   </div>
-                  {cardPackAppearances && cardPackAppearances.length > 0 && (
-                    <div className="text-sm mt-1 flex flex-wrap gap-2 items-center">
-                      {cardPackAppearances.map((appearance, idx) => (
-                        <span key={appearance.categoryName || idx} style={{ color: '#ccff00' }}>
-                          {appearance.categoryName ? `"${appearance.categoryName}"` : ''}
-                          {idx < cardPackAppearances.length - 1 && <span className="text-gray-400">, </span>}
-                        </span>
+                  {limitedCategoryUnderTitleLines.length > 0 && (
+                    <div className="mt-1 space-y-0.5">
+                      {limitedCategoryUnderTitleLines.map(({ key, label }) => (
+                        <p key={key} className="text-sm text-[#ccff00] leading-snug">
+                          {label}
+                        </p>
                       ))}
-                      <span className="text-gray-400"> 카드팩 한정</span>
-                    </div>
-                  )}
-                  {(!cardPackAppearances || cardPackAppearances.length === 0) && limitedCategoryName && (
-                    <div className="text-sm mt-1" style={{ color: '#ccff00' }}>
-                      "{limitedCategoryName}" 카드팩 한정
                     </div>
                   )}
                   <div className="flex items-center gap-3 mt-1 text-base">
-                    {keywordId && keywordId !== "0" && (
+                    {showKeywordUi && (
                       <div className="flex items-center gap-1">
                         <span className="text-yellow-400 font-medium">{keywordName}</span>
                       </div>
@@ -612,9 +669,113 @@ export default function EgoGiftPreview({
             </div>
           </div>
         )}
+
+        {/* 한정 카드팩 (획득 가능 이벤트 아래, ▶ 아이콘 토글 — 기본 접힘) */}
+        {hasLimitedCardPackInfo && (
+          <div className="mt-6 border-t border-[#b8860b]/30 pt-4">
+            <button
+              type="button"
+              id="egogift-preview-limited-cardpack-toggle"
+              aria-expanded={limitedCardPackOpen}
+              aria-controls="egogift-preview-limited-cardpack-panel"
+              aria-label={limitedCardPackOpen ? "한정 카드팩 접기" : "한정 카드팩 펼치기"}
+              title={limitedCardPackOpen ? "한정 카드팩 접기" : "한정 카드팩 펼치기"}
+              onClick={() => setLimitedCardPackOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 text-left rounded-md px-1 py-2 -mx-1 hover:bg-[#2a2a2a]/80 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b8860b]/60"
+            >
+              <span className="font-semibold text-[#ffcc33]">한정 카드팩</span>
+              <span
+                className={`inline-block shrink-0 text-yellow-200/80 transition-transform duration-200 ${limitedCardPackOpen ? "rotate-90" : ""}`}
+                aria-hidden
+              >
+                ▶
+              </span>
+            </button>
+            {limitedCardPackOpen && (
+              <div
+                id="egogift-preview-limited-cardpack-panel"
+                role="region"
+                aria-labelledby="egogift-preview-limited-cardpack-toggle"
+                className="mt-2 pl-1"
+              >
+                <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-2 md:gap-3">
+                  {cardPackAppearances.map((appearance, idx) => {
+                    const canOpen =
+                      appearance.cardpackId != null && appearance.cardpackId !== undefined;
+                    const title = appearance.cardpackTitle?.trim() || "카드팩";
+                    return (
+                      <button
+                        key={
+                          canOpen
+                            ? `cp-${appearance.cardpackId}-${idx}`
+                            : `cp-idx-${idx}`
+                        }
+                        type="button"
+                        disabled={!canOpen}
+                        onClick={() => {
+                          if (canOpen) setCardPackModalId(appearance.cardpackId!);
+                        }}
+                        className={`flex flex-col items-stretch gap-1 rounded-md border border-[#b8860b]/30 bg-[#141414]/90 p-2 text-left transition-colors ${
+                          canOpen
+                            ? "hover:bg-[#1c1c1c] hover:border-[#b8860b]/55 cursor-pointer"
+                            : "opacity-55 cursor-not-allowed"
+                        }`}
+                      >
+                        <div className="w-full flex justify-center items-end min-h-[88px] md:min-h-[104px]">
+                          {appearance.thumbnailPath ? (
+                            <img
+                              src={`${baseUrl}${appearance.thumbnailPath}`}
+                              alt={title}
+                              className="max-h-[100px] md:max-h-[120px] w-auto object-contain border border-[#b8860b]/45 rounded"
+                              onLoad={(e) => {
+                                const img = e.target as HTMLImageElement;
+                                const maxH = window.innerWidth >= 768 ? 120 : 100;
+                                const nw = img.naturalWidth;
+                                const nh = img.naturalHeight;
+                                if (nw && nh) {
+                                  const ar = nw / nh;
+                                  img.style.height = `${maxH}px`;
+                                  img.style.width = `${maxH * ar}px`;
+                                }
+                              }}
+                              onError={(ev) => {
+                                (ev.target as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <div className="h-[88px] w-full max-w-[72px] mx-auto flex items-center justify-center border border-dashed border-[#b8860b]/35 rounded text-[10px] text-gray-500">
+                              이미지 없음
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-h-0 px-0.5">
+                          <div className="text-[10px] md:text-xs text-center text-[#e8d4a8] font-medium line-clamp-2 leading-tight">
+                            {title}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         </div>
       </div>
     </div>
+
+    <CardPackDetailModal
+      open={cardPackModalId != null}
+      cardpackId={cardPackModalId}
+      onClose={() => setCardPackModalId(null)}
+      baseUrl={baseUrl}
+      allKeywords={allKeywords}
+      allEgoGifts={allEgoGiftsForHighlight}
+      onEgoGiftClick={handleEgoGiftFromCardPackModal}
+      stackZBase={10020}
+    />
+    </>
   );
 }
 
