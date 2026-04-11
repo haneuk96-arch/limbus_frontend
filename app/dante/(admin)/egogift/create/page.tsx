@@ -39,6 +39,7 @@ export default function EgoGiftCreatePage() {
   const [cost, setCost] = useState("");
   const [enhanceYn, setEnhanceYn] = useState("Y");
   const [synthesisYn, setSynthesisYn] = useState("N");  // 합성전용 여부
+  const [priorityYn, setPriorityYn] = useState("N"); // 파우스트 보고서 등 목록에서 앞쪽 정렬
   /** '' = 미선택(DB null), CURSE/BLESS 중 하나만 */
   const [curseBlessCd, setCurseBlessCd] = useState<"" | EgoGiftCurseBlessCd>("");
   const [selectedGrades, setSelectedGrades] = useState<string[]>([]);  // 출현난이도: 'N', 'H', 'E'
@@ -242,6 +243,7 @@ export default function EgoGiftCreatePage() {
         cost: cost ? Number(cost) : 0,
         enhanceYn,
         synthesisYn,
+        priorityYn,
         ...curseBlessFieldsForMultipartJson(curseBlessCd),
         grades: selectedGrades,
         desc1,
@@ -569,6 +571,38 @@ export default function EgoGiftCreatePage() {
                       value={option.value}
                       checked={synthesisYn === option.value}
                       onChange={(e) => setSynthesisYn(e.target.value)}
+                      className="hidden"
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-yellow-300 text-sm font-medium mb-2">
+                우선순위{" "}
+                <span className="text-gray-500 text-xs font-normal">(보고서 키워드별 목록에서 Y가 앞)</span>
+              </label>
+              <div className="flex gap-4">
+                {[
+                  { value: "Y", label: "Y" },
+                  { value: "N", label: "N" },
+                ].map((option) => (
+                  <label
+                    key={option.value}
+                    className={`flex-1 px-3 sm:px-4 py-2 rounded cursor-pointer border font-medium text-center text-sm sm:text-base ${
+                      priorityYn === option.value
+                        ? "bg-yellow-400 text-black border-yellow-400"
+                        : "bg-[#1c1c1f] text-gray-300 border-red-700 hover:bg-[#2a2a2d]"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="priorityYn"
+                      value={option.value}
+                      checked={priorityYn === option.value}
+                      onChange={(e) => setPriorityYn(e.target.value)}
                       className="hidden"
                     />
                     {option.label}

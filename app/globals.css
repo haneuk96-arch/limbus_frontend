@@ -45,41 +45,31 @@ body {
   animation: fade-in-soft 0.35s ease-out;
 }
 
-/* 키워드 영역 이미지 캡처 시 html2canvas lab/oklab 파싱 오류 방지 - 모든 색상을 hex/rgb로 */
-.keyword-capture-hex,
-.keyword-capture-hex * {
-  color: #d1d5db !important;
-  background-color: #131316 !important;
-  background-image: none !important;
-  border-color: #5b6366 !important;
-  box-shadow: none !important;
-  outline-color: #5b6366 !important;
+/*
+ * 캡처 구간(.keyword-capture-hex)만 보조 스타일.
+ * 과거 html2canvas용 전역 덮어쓰기(color/bg/box-shadow 일괄 제거)는 화면과 PNG가 달라져 제거함.
+ * 스냅샷은 html-to-image(foreignObject)로 브라우저 계산 스타일에 가깝게 렌더.
+ */
+.keyword-capture-hex .result-egogift-checked-overlay {
+  display: none !important;
 }
-.keyword-capture-hex > h3 {
-  color: #fef08a !important;
+.keyword-capture-hex .result-egogift-card--checked {
+  filter: brightness(1) !important;
 }
-.keyword-capture-hex [class*="purple"] {
-  color: #d8b4fe !important;
+.keyword-capture-hex .result-egogift-acquire-zone,
+.keyword-capture-hex .result-egogift-acquire-shade {
+  background-color: transparent !important;
+  background: transparent !important;
 }
-.keyword-capture-hex [class*="yellow"] {
-  color: #fef08a !important;
+/* 캡처 시 숨김(opacity 0) 버튼이 불투명 배경이면 스냅샷에 얼룩으로 남을 수 있음 */
+.keyword-capture-hex button[data-result-egogift-info],
+.keyword-capture-hex button[data-result-egogift-delete] {
+  background-color: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
-.keyword-capture-hex [class*="amber"] {
-  color: #fbbf24 !important;
-}
-/* 캡처 시에도 출현난이도별 테두리·그림자 유지 (hex/rgb만 사용) */
-.keyword-capture-hex .result-egogift-card--extreme {
-  border: 2px solid rgb(248, 113, 113) !important;
-  box-shadow: 0 0 14px rgba(248, 113, 113, 0.9) !important;
-  background-color: rgba(19, 19, 22, 0.95) !important;
-}
-.keyword-capture-hex .result-egogift-card--hard {
-  border: 2px solid #e8a0a0 !important;
-  background-color: rgba(19, 19, 22, 0.95) !important;
-}
-.keyword-capture-hex .result-egogift-card--normal {
-  border: 1px solid rgba(184, 134, 11, 0.4) !important;
-  background-color: #131316 !important;
+.keyword-capture-hex img {
+  background-color: transparent !important;
 }
 
 /* 결과 탭 에고기프트 카드: 등급(로마숫자) 스타일 - 화면·캡처 공통 */
@@ -87,7 +77,6 @@ body {
   color: #ffcc33 !important;
   text-shadow: 0 0 5px rgba(0, 0, 0, 0.9);
 }
-/* 캡처 시에도 등급 색상 유지 (덮어쓰기 우선) */
 .keyword-capture-hex .result-egogift-tier {
   color: #ffcc33 !important;
   text-shadow: 0 0 5px rgba(0, 0, 0, 0.9) !important;

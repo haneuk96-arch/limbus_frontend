@@ -1678,11 +1678,13 @@ export function CardPackPageContent({
           keywords={previewKeywords}
           hashtags={previewHashtags}
           allKeywords={allKeywords}
+          allEgoGiftsForHighlight={allEgoGifts}
           egogiftId={egogiftPreviewData.egogift.egogiftId}
           recipes={egogiftRecipe}
           obtainableEvents={egogiftPreviewData?.obtainableEvents || []}
           limitedCategoryName={egogiftPreviewData?.limitedCategoryName || null}
           cardPackAppearances={egogiftPreviewData?.cardPackAppearances || []}
+          onEgoGiftClickById={handleEgoGiftClick}
           onEgoGiftClick={async (giftName: string) => {
             // 조합식 내 에고기프트 클릭 시 이름으로 조회
             try {

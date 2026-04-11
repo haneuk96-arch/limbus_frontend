@@ -481,6 +481,51 @@ function EventPageContent() {
     }
   };
 
+  const handleEgoGiftClickById = async (egogiftId: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/egogift/${egogiftId}`, {
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEgoGiftPreviewData(data);
+        setPreviewHashtags(data.tags || []);
+
+        if (data.keyword) {
+          setKeywords([
+            {
+              keywordId: data.keyword.keywordId,
+              keywordName: data.keyword.keywordName,
+              categoryName: data.keyword.categoryName || "",
+            },
+          ]);
+        }
+
+        setEgoGiftPreviewOpen(true);
+
+        if (data.egogift?.egogiftId) {
+          try {
+            const recipeRes = await fetch(`${API_BASE_URL}/user/egogift/${data.egogift.egogiftId}/recipe`, {
+              credentials: "include",
+            });
+            if (recipeRes.ok) {
+              const recipeData = await recipeRes.json();
+              setEgoGiftRecipe(recipeData.recipes || []);
+            } else {
+              setEgoGiftRecipe(null);
+            }
+          } catch {
+            setEgoGiftRecipe(null);
+          }
+        } else {
+          setEgoGiftRecipe(null);
+        }
+      }
+    } catch (err) {
+      console.error("에고기프트 상세 조회 실패:", err);
+    }
+  };
+
   const renderNodeTree = (parentClientKey: string | null, depth: number = 0): React.ReactElement[] => {
     if (!previewEvent || !previewEvent.nodes) return [];
 
@@ -897,12 +942,14 @@ function EventPageContent() {
           keywords={keywords}
           hashtags={previewHashtags}
           allKeywords={allKeywords}
+          allEgoGiftsForHighlight={allEgoGifts}
           egogiftId={egogiftPreviewData.egogift.egogiftId}
           recipes={egogiftRecipe}
           obtainableEvents={egogiftPreviewData?.obtainableEvents || []}
           limitedCategoryName={egogiftPreviewData?.limitedCategoryName || null}
           cardPackAppearances={egogiftPreviewData?.cardPackAppearances || []}
           onEgoGiftClick={(giftName) => handleEgoGiftClick(giftName)}
+          onEgoGiftClickById={handleEgoGiftClickById}
           onClose={closeEgoGiftModal}
         />,
         document.body

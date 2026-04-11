@@ -7,7 +7,71 @@ const RESULT_EGOGIFT_BASE_URL = API_BASE_URL.replace("/api", "");
 import { getOrCreateUUID } from "@/lib/uuid";
 import { EgoGiftPageContent } from "@/app/egogift/page";
 import { CardPackPageContent } from "@/app/cardpack/page";
-import { ResultKeywordSection } from "./ResultKeywordSection";
+import {
+  ResultKeywordSection,
+  SynthesisRecipesSubsetBlock,
+  filterSynthesisRecipesForEgoIds,
+  type ResultEgoGiftItem,
+} from "./ResultKeywordSection";
+import {
+  ObservedEgoGiftsSection,
+  isObservableEgoGiftCandidate,
+  type ObservableEgoCatalogItem,
+} from "./ObservedEgoGiftsSection";
+import {
+  inlineExternalImagesForCapture,
+  snapshotElementToPngDataUrl,
+  downloadPngDataUrl,
+  formatCaptureError,
+} from "@/lib/captureDomToPng";
+
+/** 관측 카탈로그: 한 페이지(size) 제한을 넘는 전체 건수까지 순회 조회 */
+async function fetchAllUserEgoGiftsForObservableCatalog(signal: AbortSignal): Promise<any[]> {
+  const PAGE_SIZE = 2000;
+  const acc: any[] = [];
+  let page = 0;
+  let totalPages = 1;
+  const MAX_PAGES = 500;
+  do {
+    const res = await fetch(
+      `${API_BASE_URL}/user/egogift?page=${page}&size=${PAGE_SIZE}`,
+      { credentials: "include", signal },
+    );
+    if (!res.ok) break;
+    const data = await res.json();
+    const batch: any[] = data.items || [];
+    acc.push(...batch);
+    totalPages = Math.max(1, Number(data.totalPages) || 1);
+    const totalEl = Number(data.totalElements);
+    if (Number.isFinite(totalEl) && acc.length >= totalEl) break;
+    if (batch.length === 0) break;
+    page++;
+    if (page >= totalPages || page >= MAX_PAGES) break;
+  } while (true);
+  const byId = new Map<number, any>();
+  for (const item of acc) {
+    const id = Number(item.egogiftId);
+    if (Number.isFinite(id) && id > 0) byId.set(id, item);
+  }
+  return [...byId.values()];
+}
+
+/** ego_gift_recipe_map 타입「결과」에 등록된 ID (synthesis_yn 과 무관) */
+async function fetchRecipeResultEgogiftIds(signal: AbortSignal): Promise<Set<number>> {
+  const res = await fetch(`${API_BASE_URL}/user/egogift/synthesis-result-egogift-ids`, {
+    credentials: "include",
+    signal,
+  });
+  if (!res.ok) return new Set();
+  const data = await res.json();
+  const raw = data.egogiftIds ?? [];
+  const out = new Set<number>();
+  for (const x of raw) {
+    const n = Number(x);
+    if (Number.isFinite(n) && n > 0) out.add(n);
+  }
+  return out;
+}
 
 interface FavoriteItem {
   favoriteId: number;
@@ -25,6 +89,9 @@ const TAB_LIST: { key: FavoritesTab; label: string }[] = [
   { key: "result", label: "파우스트의 보고서" },
   { key: "egogift", label: "에고기프트" },
 ];
+
+/** 결과 탭 모아보기: 단일 ResultKeywordSection(ref·접기 state 키) */
+const RESULT_EGO_FLAT_SECTION_KEY = "__flat__";
 
 /** 스키마 v2: 진행 예정 층 행 — 1행 1~5, 2행 6~10, 3행 11~15 */
 const V2_FLOOR_ROWS = [
@@ -97,6 +164,42 @@ const V2_MODAL_TAB_API_DIFFICULTIES: Record<V2PlannedDifficultyKey, readonly str
   하드: ["하드"],
   익스트림: ["하드", "익스트림"],
 };
+
+/** 결과 탭 에고기프트: 키워드별 / 모아보기 / 층별(한정·선택 카드팩 요약) */
+type ResultEgoGiftViewMode = "keyword" | "flat" | "floor";
+
+function parseResultEgoGiftViewMode(parsed: {
+  resultEgoGiftViewMode?: unknown;
+  resultEgoGiftViewByKeyword?: unknown;
+}): ResultEgoGiftViewMode {
+  const m = parsed.resultEgoGiftViewMode;
+  if (m === "keyword" || m === "flat" || m === "floor") return m;
+  if (parsed.resultEgoGiftViewByKeyword === false) return "flat";
+  return "keyword";
+}
+
+/** 합성 결과 에고 ID로 조합식 재료 egogiftId 목록 조회 (합성 결과가 아니면 빈 배열) */
+async function fetchSynthesisMaterialEgogiftIdsForResult(resultEgogiftId: number): Promise<number[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/user/egogift/synthesis-recipes?egogiftIds=${resultEgogiftId}`, {
+      credentials: "include",
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as unknown;
+    const items = Array.isArray(data) ? data : [];
+    const materialIds = new Set<number>();
+    for (const r of items as { resultEgogiftId?: unknown; materials?: { egogiftId?: unknown }[] }[]) {
+      if (Number(r.resultEgogiftId) !== resultEgogiftId) continue;
+      for (const m of r.materials ?? []) {
+        const mid = Number(m.egogiftId);
+        if (!Number.isNaN(mid) && mid > 0) materialIds.add(mid);
+      }
+    }
+    return [...materialIds];
+  } catch {
+    return [];
+  }
+}
 
 interface PlannableCardPack {
   cardpackId: number;
@@ -245,6 +348,10 @@ export default function FavoritesPage() {
   const [starredEgoGiftIds, setStarredEgoGiftIds] = useState<number[]>([]);
   /** 보고서에 포함된 카드팩 ID (JSON 동기화, 결과 탭 표시용) */
   const [starredCardPackIds, setStarredCardPackIds] = useState<number[]>([]);
+  /** 결과 탭: 관측 에고기프트 (최대 3, Ⅳ·EX·조합 결과 등 제외 후보만, searchJson.observedEgoGiftIds) */
+  const [observedEgoGiftIds, setObservedEgoGiftIds] = useState<number[]>([]);
+  const [observableEgoGiftCatalog, setObservableEgoGiftCatalog] = useState<ObservableEgoCatalogItem[]>([]);
+  const [observableEgoGiftCatalogLoading, setObservableEgoGiftCatalogLoading] = useState(false);
   /** 등록된 즐겨찾기 목록에서 선택한 항목 (favoriteId, null이면 미선택) */
   const [selectedFavoriteId, setSelectedFavoriteId] = useState<number | null>(null);
   /** 저장 완료 토스트 (내려왔다가 올라가는 안내) */
@@ -261,6 +368,8 @@ export default function FavoritesPage() {
     giftTier?: string;
     grades?: string[];
     synthesisYn?: string;
+    /** 보고서 키워드별 목록 정렬: Y면 같은 키워드 내에서 앞 */
+    priorityYn?: string;
     limitedCategoryNames?: string[];
   }>>([]);
   const [resultEgoGiftsLoading, setResultEgoGiftsLoading] = useState(false);
@@ -284,7 +393,7 @@ export default function FavoritesPage() {
   const starredCardPacksSectionRef = useRef<HTMLDivElement | null>(null);
   /** 스키마 v2 진행(예정) 카드팩 그리드 섹션 캡처용 */
   const v2PlannedCardPacksSectionRef = useRef<HTMLDivElement | null>(null);
-  /** 결과 탭에서 에고기프트 클릭 시 상세 모달 열기 (EgoGiftPageContent가 설정) */
+  /** 결과 탭 키워드별 에고: 「정보 보기」 클릭 시 상세 모달 (EgoGiftPageContent가 설정) */
   const egoGiftPreviewOpenRef = useRef<((giftName: string) => void) | null>(null);
   /** 결과 탭에서 카드팩 클릭 시 상세 모달 열기 (CardPackPageContent가 설정) */
   const cardPackDetailOpenRef = useRef<{ open: (cardpackId: number) => void } | null>(null);
@@ -294,6 +403,11 @@ export default function FavoritesPage() {
   const [keywordGiftExpandedByKeyword, setKeywordGiftExpandedByKeyword] = useState<Record<string, boolean>>({});
   /** 결과 탭 간소화: 이름/출현카드팩/합성 여부만, 조합식은 이름만 */
   const [resultSimplified, setResultSimplified] = useState(false);
+  const [resultEgoGiftViewMode, setResultEgoGiftViewMode] = useState<ResultEgoGiftViewMode>("keyword");
+  /** 모아보기: 키워드 순 정렬(켜면 키워드 그룹 순, 끄면 즐겨찾기 순). 등급 정렬과 동시 적용 가능 */
+  const [flatSortByKeyword, setFlatSortByKeyword] = useState(false);
+  /** 모아보기: 등급 정렬 — 첫 클릭 DESC, 두 번째 ASC, 세 번째 해제 */
+  const [flatTierSort, setFlatTierSort] = useState<"off" | "desc" | "asc">("off");
   /** 결과 탭: 선택한 카드팩 목록 (ID로 조회한 상세) */
   const [resultStarredCardPacks, setResultStarredCardPacks] = useState<Array<{
     cardpackId: number;
@@ -324,6 +438,11 @@ export default function FavoritesPage() {
   const [checkedCardPackByFloor, setCheckedCardPackByFloor] = useState<Record<number, number>>({});
   /** 결과 탭 에고기프트: 체크한 에고기프트 ID 목록 */
   const [checkedEgoGiftIds, setCheckedEgoGiftIds] = useState<number[]>([]);
+  /** 층별 보기: 각 층 슬롯의 카드팩에서 획득 가능한 한정 즐겨찾기 에고기프트 */
+  const [floorLimitedRows, setFloorLimitedRows] = useState<
+    Array<{ floor: number; cardpackId: number; title: string; thumbnail?: string; limitedEgoGifts: ResultEgoGiftItem[] }>
+  >([]);
+  const [floorLimitedRowsLoading, setFloorLimitedRowsLoading] = useState(false);
 
   const toggleCardPackCheck = (cardpackId: number) => {
     const floor = resultCardPackFloor;
@@ -352,11 +471,33 @@ export default function FavoritesPage() {
       .sort((a, b) => a - b);
   };
 
-  const toggleEgoGiftCheck = (egogiftId: number) => {
-    setCheckedEgoGiftIds((prev) =>
-      prev.includes(egogiftId) ? prev.filter((id) => id !== egogiftId) : [...prev, egogiftId]
+  /** 놓친 한정 API exclude: 즐겨찾기 카드팩 ID + 층별 슬롯에 체크한 카드팩 ID (백엔드가 에고 단위로 동일 출현 풀 전부 제외) */
+  const mergedExcludeCardpackIdsForMissedLimited = useMemo(() => {
+    const fromFloors = Object.values(checkedCardPackByFloor).filter(
+      (id): id is number => typeof id === "number" && !Number.isNaN(id) && id > 0
     );
-  };
+    return [...new Set([...starredCardPackIds, ...fromFloors])].sort((a, b) => a - b);
+  }, [starredCardPackIds, checkedCardPackByFloor]);
+
+  const toggleEgoGiftCheck = useCallback((egogiftId: number) => {
+    setCheckedEgoGiftIds((prev) => {
+      if (prev.includes(egogiftId)) {
+        return prev.filter((id) => id !== egogiftId);
+      }
+      const recipe = synthesisRecipes.find((r) => r.resultEgogiftId === egogiftId);
+      const next = [...prev, egogiftId];
+      const seen = new Set(next);
+      if (recipe?.materials?.length) {
+        for (const m of recipe.materials) {
+          const mid = Number(m.egogiftId);
+          if (Number.isNaN(mid) || mid <= 0 || seen.has(mid)) continue;
+          next.push(mid);
+          seen.add(mid);
+        }
+      }
+      return next;
+    });
+  }, [synthesisRecipes]);
 
   // 노말/하드 선택 시 6~15층 미표시이므로, 해당 층이 선택돼 있으면 5층으로 초기화 (1~5층·전체는 유지)
   useEffect(() => {
@@ -365,11 +506,29 @@ export default function FavoritesPage() {
     }
   }, [resultCardPackDifficulty]);
 
-  const handleStarToggle = (egogiftId: number) => {
-    setStarredEgoGiftIds((prev) =>
-      prev.includes(egogiftId) ? prev.filter((id) => id !== egogiftId) : [...prev, egogiftId]
-    );
-  };
+  const handleStarToggle = useCallback((egogiftId: number) => {
+    let addedResult = false;
+    setStarredEgoGiftIds((prev) => {
+      if (prev.includes(egogiftId)) {
+        return prev.filter((id) => id !== egogiftId);
+      }
+      addedResult = true;
+      return [...prev, egogiftId];
+    });
+    if (!addedResult) return;
+    void (async () => {
+      const materialIds = await fetchSynthesisMaterialEgogiftIdsForResult(egogiftId);
+      if (materialIds.length === 0) return;
+      setStarredEgoGiftIds((prev) => {
+        if (!prev.includes(egogiftId)) return prev;
+        const next = [...prev];
+        for (const id of materialIds) {
+          if (!next.includes(id)) next.push(id);
+        }
+        return next;
+      });
+    })();
+  }, []);
 
   /** 결과 탭 키워드별 카드에서 즐겨찾기(보고서에 포함된 에고기프트) 해제 */
   const removeStarredEgoGift = (egogiftId: number) => {
@@ -614,6 +773,70 @@ export default function FavoritesPage() {
     missedLimitedLastFetchSnapshotRef.current = null;
   }, [selectedFavoriteId]);
 
+  /** 결과 탭: 관측 후보 = 전체 에고기프트 + 조합식「결과」ID·Ⅳ·EX·synthesisYn 등 제외 */
+  useEffect(() => {
+    if (activeTab !== "result") return;
+    const ac = new AbortController();
+    let cancelled = false;
+    setObservableEgoGiftCatalogLoading(true);
+    Promise.all([
+      fetchAllUserEgoGiftsForObservableCatalog(ac.signal),
+      fetchRecipeResultEgogiftIds(ac.signal).catch(() => new Set<number>()),
+    ])
+      .then(([rawItems, recipeResultIds]) => {
+        if (cancelled) return;
+        const items: ObservableEgoCatalogItem[] = rawItems
+          .map((item: any) => {
+            const rawTier = item.giftTier ?? item.gift_tier;
+            const giftTier = rawTier != null && rawTier !== "" ? String(rawTier).trim() : undefined;
+            const rawSyn = item.synthesisYn ?? item.synthesis_yn;
+            const synthesisYn =
+              rawSyn != null && rawSyn !== "" ? String(rawSyn).trim() : undefined;
+            const rawGrades = item.grades;
+            const grades = Array.isArray(rawGrades)
+              ? rawGrades.map((x: unknown) => String(x).trim().toUpperCase()).filter(Boolean)
+              : undefined;
+            return {
+              egogiftId: Number(item.egogiftId),
+              giftName: String(item.giftName ?? "").trim(),
+              keywordName: item.keywordName ? String(item.keywordName).trim() || "기타" : "기타",
+              giftTier,
+              synthesisYn,
+              grades: grades?.length ? grades : undefined,
+              thumbnail: item.thumbnail ?? item.thumbnail_path,
+            };
+          })
+          .filter(
+            (x: ObservableEgoCatalogItem) =>
+              x.egogiftId > 0 &&
+              x.giftName &&
+              isObservableEgoGiftCandidate(x.giftTier, x.synthesisYn, x.egogiftId, recipeResultIds),
+          );
+        setObservableEgoGiftCatalog(items);
+      })
+      .catch(() => {
+        if (!cancelled) setObservableEgoGiftCatalog([]);
+      })
+      .finally(() => {
+        setObservableEgoGiftCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [activeTab]);
+
+  /** 카탈로그 갱신 시: 목록에 없는 ID·4슬롯 초과 제거 */
+  useEffect(() => {
+    if (observableEgoGiftCatalog.length === 0) return;
+    const allowed = new Set(observableEgoGiftCatalog.map((c) => c.egogiftId));
+    setObservedEgoGiftIds((prev) => {
+      const next = prev.filter((id) => allowed.has(id)).slice(0, 3);
+      if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
+      return next;
+    });
+  }, [observableEgoGiftCatalog]);
+
   // 결과 탭: 선택한 즐겨찾기의 에고기프트 ID로 목록 조회 후 키워드별 표시용으로 저장
   useEffect(() => {
     if (activeTab !== "result" || starredEgoGiftIds.length === 0) {
@@ -655,13 +878,16 @@ export default function FavoritesPage() {
               giftTier,
               grades: Array.isArray(item.grades) ? item.grades : [],
               synthesisYn: item.synthesisYn ?? item.synthesis_yn,
+              priorityYn: item.priorityYn ?? item.priority_yn ?? "N",
               limitedCategoryNames: Array.isArray(item.limitedCategoryNames) ? item.limitedCategoryNames : [],
             };
           });
         setResultEgoGifts(filtered);
-        const synthesisIds = filtered.filter((eg: { synthesisYn?: string }) => eg.synthesisYn === "Y").map((eg: { egogiftId: number }) => eg.egogiftId);
+        /** 합성 전용(Y)만이 아니라 재료로만 쓰이는 에고(층별 한정 등) 조합식도 API가 반환하도록 전부 전달 */
+        const resultRowsForSynthesis = filtered as Array<{ egogiftId: number }>;
+        const synthesisIds: number[] = [...new Set<number>(resultRowsForSynthesis.map((eg) => eg.egogiftId))];
         if (synthesisIds.length > 0) {
-          const q = synthesisIds.map((id: number) => "egogiftIds=" + id).join("&");
+          const q = synthesisIds.map((id) => "egogiftIds=" + id).join("&");
           fetch(`${API_BASE_URL}/user/egogift/synthesis-recipes?${q}`, { credentials: "include" })
             .then((r) => (r.ok ? r.json() : []))
             .then((data: any[]) => {
@@ -788,7 +1014,7 @@ export default function FavoritesPage() {
     }
 
     const curLimitedSorted = [...limitedStarredEgoGiftIds].sort((a, b) => a - b);
-    const curExcludeSorted = [...starredCardPackIds].sort((a, b) => a - b);
+    const curExcludeSorted = mergedExcludeCardpackIdsForMissedLimited;
     const filterKey =
       selectedReportSchemaVersion === 2
         ? "v2:all"
@@ -812,7 +1038,10 @@ export default function FavoritesPage() {
     }
     const difficultyParams = difficulties.map((d) => `difficulties=${encodeURIComponent(d)}`).join("&");
     const egogiftParams = limitedStarredEgoGiftIds.map((id) => `egogiftIds=${id}`).join("&");
-    const excludeParams = starredCardPackIds.length > 0 ? starredCardPackIds.map((id) => `excludeCardpackIds=${id}`).join("&") : "";
+    const excludeParams =
+      mergedExcludeCardpackIdsForMissedLimited.length > 0
+        ? mergedExcludeCardpackIdsForMissedLimited.map((id) => `excludeCardpackIds=${id}`).join("&")
+        : "";
     const floorParamStr = floorParam != null ? `floor=${floorParam}` : "";
     const query = [difficultyParams, floorParamStr, egogiftParams, excludeParams].filter(Boolean).join("&");
     fetch(`${API_BASE_URL}/user/cardpack/for-limited-starred-egogifts?${query}`, { credentials: "include" })
@@ -849,7 +1078,14 @@ export default function FavoritesPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, resultCardPackDifficulty, resultCardPackFloor, resultEgoGifts, starredCardPackIds, selectedReportSchemaVersion]);
+  }, [
+    activeTab,
+    resultCardPackDifficulty,
+    resultCardPackFloor,
+    resultEgoGifts,
+    mergedExcludeCardpackIdsForMissedLimited,
+    selectedReportSchemaVersion,
+  ]);
 
   // 결과 탭: 키워드별 그룹 (키워드 순서 고정, 기타는 맨 뒤), 그룹 내는 등급 낮은 순(1 → 2 → … → EX)
   const RESULT_KEYWORD_ORDER = [
@@ -877,6 +1113,9 @@ export default function FavoritesPage() {
     }
     return min;
   };
+  /** 우선순위 Y인 에고기프트를 같은 키워드 그룹 안에서 먼저 */
+  const prioritySortOrder = (priorityYn: string | undefined): number =>
+    String(priorityYn ?? "N").trim().toUpperCase() === "Y" ? 0 : 1;
   const tierDisplay = (tier: string | undefined): string => {
     if (tier == null || tier === "") return "－";
     const t = String(tier).trim().toUpperCase();
@@ -907,7 +1146,10 @@ export default function FavoritesPage() {
       const el = isSynthesis ? synthesisSectionRefs.current[keyword] : keywordSectionRefs.current[keyword];
       if (!el || typeof window === "undefined") return;
       const favoriteTitle = getFavoriteTitle();
-      const safeKeyword = keyword.replace(/[\\/:*?"<>|]/g, "_").trim() || "키워드";
+      const safeKeyword =
+        keyword === RESULT_EGO_FLAT_SECTION_KEY
+          ? "모아보기"
+          : keyword.replace(/[\\/:*?"<>|]/g, "_").trim() || "키워드";
       const dateStr = (() => {
         const d = new Date();
         const pad = (n: number) => String(n).padStart(2, "0");
@@ -915,75 +1157,16 @@ export default function FavoritesPage() {
       })();
       const baseName = `${favoriteTitle}_에고기프트_${safeKeyword}${isSynthesis ? "_조합식" : ""}_${dateStr}.png`;
 
-      const restores: { img: HTMLImageElement; originalSrc: string; blobUrl: string }[] = [];
       try {
-        const imgs = el.querySelectorAll<HTMLImageElement>("img[src]");
-        const baseOrigin = typeof window !== "undefined" ? window.location.origin : "";
-        for (const img of imgs) {
-          const src = img.getAttribute("src");
-          if (!src || src.startsWith("data:") || src.startsWith("blob:")) continue;
-          try {
-            const imgOrigin = new URL(src, window.location.href).origin;
-            if (imgOrigin === baseOrigin) continue;
-            let res = await fetch(src, { credentials: "include", mode: "cors" }).catch(() => null);
-            if (!res?.ok) {
-              const proxyUrl = `${window.location.origin}/api/proxy-image?url=${encodeURIComponent(src)}`;
-              res = await fetch(proxyUrl).catch(() => null);
-            }
-            if (!res?.ok) continue;
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            restores.push({ img, originalSrc: src, blobUrl });
-            img.src = blobUrl;
-            await img.decode?.().catch(() => new Promise<void>((r) => { img.onload = () => r(); }));
-          } catch {
-            /* 개별 이미지 실패 시 스킵 */
-          }
+        const restoreImgs = await inlineExternalImagesForCapture(el);
+        try {
+          const dataUrl = await snapshotElementToPngDataUrl(el);
+          downloadPngDataUrl(baseName, dataUrl);
+        } finally {
+          restoreImgs();
         }
-        const { default: html2canvas } = await import("html2canvas");
-        el.classList.add("keyword-capture-hex");
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-        await new Promise<void>((r) => setTimeout(r, 80));
-        await document.fonts.ready;
-        const origError = console.error;
-        const origWarn = console.warn;
-        const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
-          const msg = typeof args[0] === "string" ? args[0] : String(args[0] ?? "");
-          if (/lab|lch|oklab|oklch|unsupported color/i.test(msg)) return;
-          fn.apply(console, args);
-        };
-        console.error = suppressColorParse(origError);
-        console.warn = suppressColorParse(origWarn);
-        const canvas = await html2canvas(el, {
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: "#131316",
-          scale: 2,
-          logging: false,
-        });
-        console.error = origError;
-        console.warn = origWarn;
-        el.classList.remove("keyword-capture-hex");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = baseName;
-          a.click();
-          URL.revokeObjectURL(url);
-        }, "image/png");
       } catch (err) {
-        el.classList.remove("keyword-capture-hex");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        console.error(isSynthesis ? "조합식 영역 캡처 실패:" : "키워드 영역 캡처 실패:", err);
+        console.error(isSynthesis ? "조합식 영역 캡처 실패:" : "키워드 영역 캡처 실패:", formatCaptureError(err), err);
       }
     },
     [getFavoriteTitle]
@@ -1003,77 +1186,18 @@ export default function FavoritesPage() {
 
       /* 캡처 시 화면 상태 그대로 유지: 간소화 여부·합성 접기/펼침 변경 없음. 합성제외만 클래스로 숨김 */
       if (excludeSynthesis) el.classList.add("capture-exclude-synthesis");
-      const restores: { img: HTMLImageElement; originalSrc: string; blobUrl: string }[] = [];
       try {
-        const imgs = el.querySelectorAll<HTMLImageElement>("img[src]");
-        const baseOrigin = typeof window !== "undefined" ? window.location.origin : "";
-        for (const img of imgs) {
-          const src = img.getAttribute("src");
-          if (!src || src.startsWith("data:") || src.startsWith("blob:")) continue;
-          try {
-            const imgOrigin = new URL(src, window.location.href).origin;
-            if (imgOrigin === baseOrigin) continue;
-            let res = await fetch(src, { credentials: "include", mode: "cors" }).catch(() => null);
-            if (!res?.ok) {
-              const proxyUrl = `${window.location.origin}/api/proxy-image?url=${encodeURIComponent(src)}`;
-              res = await fetch(proxyUrl).catch(() => null);
-            }
-            if (!res?.ok) continue;
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            restores.push({ img, originalSrc: src, blobUrl });
-            img.src = blobUrl;
-            await img.decode?.().catch(() => new Promise<void>((r) => { img.onload = () => r(); }));
-          } catch {
-            /* 개별 이미지 실패 시 스킵 */
-          }
+        const restoreImgs = await inlineExternalImagesForCapture(el);
+        try {
+          const dataUrl = await snapshotElementToPngDataUrl(el);
+          downloadPngDataUrl(baseName, dataUrl);
+        } finally {
+          restoreImgs();
         }
-        const { default: html2canvas } = await import("html2canvas");
-        el.classList.add("keyword-capture-hex");
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-        await new Promise<void>((r) => setTimeout(r, 80));
-        await document.fonts.ready;
-        const origError = console.error;
-        const origWarn = console.warn;
-        const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
-          const msg = typeof args[0] === "string" ? args[0] : String(args[0] ?? "");
-          if (/lab|lch|oklab|oklch|unsupported color/i.test(msg)) return;
-          fn.apply(console, args);
-        };
-        console.error = suppressColorParse(origError);
-        console.warn = suppressColorParse(origWarn);
-        const canvas = await html2canvas(el, {
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: "#131316",
-          scale: 2,
-          logging: false,
-        });
-        console.error = origError;
-        console.warn = origWarn;
-        el.classList.remove("keyword-capture-hex");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        if (excludeSynthesis) el.classList.remove("capture-exclude-synthesis");
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = baseName;
-          a.click();
-          URL.revokeObjectURL(url);
-        }, "image/png");
       } catch (err) {
-        el.classList.remove("keyword-capture-hex");
+        console.error("전체 에고기프트 캡처 실패:", formatCaptureError(err), err);
+      } finally {
         if (excludeSynthesis) el.classList.remove("capture-exclude-synthesis");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        console.error("전체 에고기프트 캡처 실패:", err);
       }
     },
     [getFavoriteTitle]
@@ -1091,75 +1215,16 @@ export default function FavoritesPage() {
       })();
       const baseName = `${favoriteTitle}_카드팩_${safeTitle}_${dateStr}.png`;
 
-      const restores: { img: HTMLImageElement; originalSrc: string; blobUrl: string }[] = [];
       try {
-        const imgs = cardEl.querySelectorAll<HTMLImageElement>("img[src]");
-        const baseOrigin = window.location.origin;
-        for (const img of imgs) {
-          const src = img.getAttribute("src");
-          if (!src || src.startsWith("data:") || src.startsWith("blob:")) continue;
-          try {
-            const imgOrigin = new URL(src, window.location.href).origin;
-            if (imgOrigin === baseOrigin) continue;
-            let res = await fetch(src, { credentials: "include", mode: "cors" }).catch(() => null);
-            if (!res?.ok) {
-              const proxyUrl = `${window.location.origin}/api/proxy-image?url=${encodeURIComponent(src)}`;
-              res = await fetch(proxyUrl).catch(() => null);
-            }
-            if (!res?.ok) continue;
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            restores.push({ img, originalSrc: src, blobUrl });
-            img.src = blobUrl;
-            await img.decode?.().catch(() => new Promise<void>((r) => { img.onload = () => r(); }));
-          } catch {
-            /* skip */
-          }
+        const restoreImgs = await inlineExternalImagesForCapture(cardEl);
+        try {
+          const dataUrl = await snapshotElementToPngDataUrl(cardEl);
+          downloadPngDataUrl(baseName, dataUrl);
+        } finally {
+          restoreImgs();
         }
-        const { default: html2canvas } = await import("html2canvas");
-        cardEl.classList.add("keyword-capture-hex");
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-        await new Promise<void>((r) => setTimeout(r, 80));
-        await document.fonts.ready;
-        const origError = console.error;
-        const origWarn = console.warn;
-        const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
-          const msg = typeof args[0] === "string" ? args[0] : String(args[0] ?? "");
-          if (/lab|lch|oklab|oklch|unsupported color/i.test(msg)) return;
-          fn.apply(console, args);
-        };
-        console.error = suppressColorParse(origError);
-        console.warn = suppressColorParse(origWarn);
-        const canvas = await html2canvas(cardEl, {
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: "#131316",
-          scale: 2,
-          logging: false,
-        });
-        console.error = origError;
-        console.warn = origWarn;
-        cardEl.classList.remove("keyword-capture-hex");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = baseName;
-          a.click();
-          URL.revokeObjectURL(url);
-        }, "image/png");
       } catch (err) {
-        cardEl.classList.remove("keyword-capture-hex");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        console.error("카드팩 이미지 캡처 실패:", err);
+        console.error("카드팩 이미지 캡처 실패:", formatCaptureError(err), err);
       }
     },
     [getFavoriteTitle]
@@ -1177,78 +1242,17 @@ export default function FavoritesPage() {
       })();
       const baseName = `${favoriteTitle}_${fileNameMiddle}_${dateStr}.png`;
 
-      const restores: { img: HTMLImageElement; originalSrc: string; blobUrl: string }[] = [];
       try {
-        const imgs = el.querySelectorAll<HTMLImageElement>("img[src]");
-        for (const img of imgs) {
-          const src = img.getAttribute("src");
-          if (!src || src.startsWith("data:") || src.startsWith("blob:")) continue;
-          try {
-            const absUrl = new URL(src, window.location.href).href;
-            // 동일 출처도 blob으로 바꿔 html2canvas가 썸네일을 안정적으로 그리도록 (진행 예정 슬롯 등)
-            let res = await fetch(absUrl, { credentials: "include", mode: "cors" }).catch(() => null);
-            if (!res?.ok) {
-              const proxyUrl = `${window.location.origin}/api/proxy-image?url=${encodeURIComponent(absUrl)}`;
-              res = await fetch(proxyUrl).catch(() => null);
-            }
-            if (!res?.ok) continue;
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            restores.push({ img, originalSrc: src, blobUrl });
-            img.src = blobUrl;
-            await img.decode?.().catch(() => new Promise<void>((r) => { img.onload = () => r(); }));
-          } catch {
-            /* skip */
-          }
+        const restoreImgs = await inlineExternalImagesForCapture(el);
+        try {
+          const dataUrl = await snapshotElementToPngDataUrl(el, { expandToScrollHeight: true });
+          downloadPngDataUrl(baseName, dataUrl);
+        } finally {
+          restoreImgs();
         }
-        const { default: html2canvas } = await import("html2canvas");
-        el.classList.add("keyword-capture-hex");
-        const prevMinHeight = el.style.minHeight;
-        el.style.minHeight = `${el.scrollHeight}px`;
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-        await new Promise<void>((r) => setTimeout(r, 80));
-        await document.fonts.ready;
-        const origError = console.error;
-        const origWarn = console.warn;
-        const suppressColorParse = (fn: typeof console.error) => (...args: unknown[]) => {
-          const msg = typeof args[0] === "string" ? args[0] : String(args[0] ?? "");
-          if (/lab|lch|oklab|oklch|unsupported color/i.test(msg)) return;
-          fn.apply(console, args);
-        };
-        console.error = suppressColorParse(origError);
-        console.warn = suppressColorParse(origWarn);
-        const canvas = await html2canvas(el, {
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: "#131316",
-          scale: 2,
-          logging: false,
-        });
-        console.error = origError;
-        console.warn = origWarn;
-        el.style.minHeight = prevMinHeight;
-        el.classList.remove("keyword-capture-hex");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = baseName;
-          a.click();
-          URL.revokeObjectURL(url);
-        }, "image/png");
       } catch (err) {
         el.style.minHeight = "";
-        el.classList.remove("keyword-capture-hex");
-        for (const { img, originalSrc, blobUrl } of restores) {
-          img.src = originalSrc;
-          URL.revokeObjectURL(blobUrl);
-        }
-        console.error("카드팩 목록 영역 캡처 실패:", err);
+        console.error("카드팩 목록 영역 캡처 실패:", formatCaptureError(err), err);
       }
     },
     [getFavoriteTitle]
@@ -1274,6 +1278,8 @@ export default function FavoritesPage() {
       const list = map.get(kw);
       if (list && list.length > 0) {
         const sorted = [...list].sort((a, b) => {
+          const priDiff = prioritySortOrder(a.priorityYn) - prioritySortOrder(b.priorityYn);
+          if (priDiff !== 0) return priDiff;
           const tierDiff = tierSortOrder(a.giftTier) - tierSortOrder(b.giftTier);
           if (tierDiff !== 0) return tierDiff;
           return gradeSortOrder(a.grades) - gradeSortOrder(b.grades);
@@ -1287,6 +1293,8 @@ export default function FavoritesPage() {
       const list = map.get(kw)!;
       if (list.length > 0) {
         const sorted = [...list].sort((a, b) => {
+          const priDiff = prioritySortOrder(a.priorityYn) - prioritySortOrder(b.priorityYn);
+          if (priDiff !== 0) return priDiff;
           const tierDiff = tierSortOrder(a.giftTier) - tierSortOrder(b.giftTier);
           if (tierDiff !== 0) return tierDiff;
           return gradeSortOrder(a.grades) - gradeSortOrder(b.grades);
@@ -1296,6 +1304,218 @@ export default function FavoritesPage() {
     }
     return ordered;
   }, [resultEgoGifts]);
+
+  /** 모아보기: 키워드 순·등급 정렬 옵션을 반영한 단일 목록 */
+  const resultEgoGiftsFlatDisplay = useMemo(() => {
+    const cmpKeywordOrder = (a: (typeof resultEgoGifts)[number], b: (typeof resultEgoGifts)[number]) => {
+      const ka = ((a.keywordName ?? "기타").trim() || "기타");
+      const kb = ((b.keywordName ?? "기타").trim() || "기타");
+      const ia = RESULT_KEYWORD_ORDER.indexOf(ka);
+      const ib = RESULT_KEYWORD_ORDER.indexOf(kb);
+      if (ia >= 0 && ib >= 0) return ia - ib;
+      if (ia >= 0) return -1;
+      if (ib >= 0) return 1;
+      return ka.localeCompare(kb, "ko");
+    };
+    let base: (typeof resultEgoGifts)[number][];
+    if (flatSortByKeyword) {
+      base = [];
+      for (const { egogifts } of resultEgoGiftsByKeyword) {
+        for (const eg of egogifts) base.push(eg);
+      }
+    } else {
+      const seen = new Set<number>();
+      base = [];
+      for (const id of starredEgoGiftIds) {
+        const eg = resultEgoGifts.find((e) => e.egogiftId === id);
+        if (eg != null && !seen.has(eg.egogiftId)) {
+          base.push(eg);
+          seen.add(eg.egogiftId);
+        }
+      }
+    }
+    if (flatTierSort === "off") {
+      return [...base];
+    }
+    const arr = [...base];
+    arr.sort((a, b) => {
+      if (flatSortByKeyword) {
+        const w = cmpKeywordOrder(a, b);
+        if (w !== 0) return w;
+      }
+      if (flatTierSort === "desc") {
+        const td = tierSortOrder(b.giftTier) - tierSortOrder(a.giftTier);
+        if (td !== 0) return td;
+      } else {
+        const ta = tierSortOrder(a.giftTier) - tierSortOrder(b.giftTier);
+        if (ta !== 0) return ta;
+      }
+      const pri = prioritySortOrder(a.priorityYn) - prioritySortOrder(b.priorityYn);
+      if (pri !== 0) return pri;
+      const gr = gradeSortOrder(a.grades) - gradeSortOrder(b.grades);
+      if (gr !== 0) return gr;
+      return a.egogiftId - b.egogiftId;
+    });
+    return arr;
+  }, [
+    flatSortByKeyword,
+    flatTierSort,
+    resultEgoGiftsByKeyword,
+    starredEgoGiftIds,
+    resultEgoGifts,
+  ]);
+
+  /** 층별 보기: 층별 한정 블록에 이미 나온 에고는 하단 모아보기 그리드에서 제외 */
+  const resultEgoGiftsFlatDisplayExcludingFloorLimited = useMemo(() => {
+    if (resultEgoGiftViewMode !== "floor") {
+      return resultEgoGiftsFlatDisplay;
+    }
+    const shown = new Set<number>();
+    for (const row of floorLimitedRows) {
+      for (const eg of row.limitedEgoGifts) {
+        shown.add(eg.egogiftId);
+      }
+    }
+    if (shown.size === 0) {
+      return resultEgoGiftsFlatDisplay;
+    }
+    return resultEgoGiftsFlatDisplay.filter((eg) => !shown.has(eg.egogiftId));
+  }, [resultEgoGiftViewMode, resultEgoGiftsFlatDisplay, floorLimitedRows]);
+
+  const showFloorLimitedEgoSection = useMemo(
+    () =>
+      resultEgoGiftViewMode === "floor" &&
+      Object.keys(checkedCardPackByFloor).length > 0 &&
+      resultEgoGifts.some((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0),
+    [resultEgoGiftViewMode, checkedCardPackByFloor, resultEgoGifts]
+  );
+
+  /** 층별 보기: 각 층「조합식」블록 + 하단 모아보기(`__flat__`) 조합식 — 전체 접기 토글 대상 키 */
+  const floorViewSynthesisSectionKeys = useMemo(
+    () => [RESULT_EGO_FLAT_SECTION_KEY, ...floorLimitedRows.map((r) => `__floor_lim_syn_${r.floor}__`)],
+    [floorLimitedRows],
+  );
+  const floorViewSynthesisAllExpanded = floorViewSynthesisSectionKeys.every(
+    (k) => synthesisExpandedByKeyword[k] !== false,
+  );
+
+  /** 층별 한정: 키워드별·등급별 정렬을 모아보기 목록과 동일하게 적용(표시 순만 `resultEgoGiftsFlatDisplay`에 맞춤) */
+  const floorLimitedRowsForDisplay = useMemo(
+    () =>
+      floorLimitedRows.map((row) => {
+        if (row.limitedEgoGifts.length === 0) {
+          return row;
+        }
+        const limitedIdSet = new Set(row.limitedEgoGifts.map((e) => e.egogiftId));
+        const sorted = resultEgoGiftsFlatDisplay.filter((eg) => limitedIdSet.has(eg.egogiftId));
+        const sortedIds = new Set(sorted.map((e) => e.egogiftId));
+        for (const eg of row.limitedEgoGifts) {
+          if (!sortedIds.has(eg.egogiftId)) {
+            sorted.push(eg);
+          }
+        }
+        return { ...row, limitedEgoGifts: sorted };
+      }),
+    [floorLimitedRows, resultEgoGiftsFlatDisplay]
+  );
+
+  const resolveCardPackMetaForFloor = useCallback(
+    (cardpackId: number): { title: string; thumbnail?: string } => {
+      const fromPlan = plannableCardPacks.find((p) => p.cardpackId === cardpackId);
+      if (fromPlan) return { title: fromPlan.title, thumbnail: fromPlan.thumbnail };
+      const fromStarred = resultStarredCardPacks.find((p) => p.cardpackId === cardpackId);
+      if (fromStarred) return { title: fromStarred.title, thumbnail: fromStarred.thumbnail };
+      return { title: `카드팩 #${cardpackId}` };
+    },
+    [plannableCardPacks, resultStarredCardPacks]
+  );
+
+  useEffect(() => {
+    if (resultEgoGiftViewMode !== "floor" || activeTab !== "result") {
+      setFloorLimitedRows([]);
+      setFloorLimitedRowsLoading(false);
+      return;
+    }
+    const limited = resultEgoGifts.filter((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0);
+    const floors = Object.keys(checkedCardPackByFloor)
+      .map(Number)
+      .filter((f) => !Number.isNaN(f))
+      .sort((a, b) => a - b);
+    if (floors.length === 0 || limited.length === 0) {
+      setFloorLimitedRows([]);
+      setFloorLimitedRowsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setFloorLimitedRowsLoading(true);
+    void (async () => {
+      const built = await Promise.all(
+        floors.map(async (floor) => {
+          const packId = checkedCardPackByFloor[floor];
+          if (!packId) return null;
+          let difficulties: string[];
+          if (selectedReportSchemaVersion === 2) {
+            const tab = plannedCardPackDifficultyByFloor[floor] ?? getV2ModalDefaultDifficultyForFloor(floor);
+            difficulties = [...V2_MODAL_TAB_API_DIFFICULTIES[tab]];
+          } else {
+            const allowed = MODAL_DIFFICULTY_ALLOWED[resultCardPackDifficulty];
+            difficulties = allowed?.length ? [...allowed] : ["노말"];
+          }
+          const matched: ResultEgoGiftItem[] = [];
+          try {
+            const difficultyParams = difficulties.map((d) => `difficulties=${encodeURIComponent(d)}`).join("&");
+            const egogiftParams = limited.map((eg) => `egogiftIds=${eg.egogiftId}`).join("&");
+            const query = `${difficultyParams}&floor=${floor}&${egogiftParams}`;
+            const res = await fetch(
+              `${API_BASE_URL}/user/cardpack/for-limited-starred-egogifts-by-ego?${query}`,
+              { credentials: "include" },
+            );
+            if (res.ok) {
+              const data = (await res.json()) as {
+                byEgogiftId?: Record<string, { cardpackId?: unknown }[]>;
+              };
+              const byEgo = data.byEgogiftId ?? {};
+              for (const eg of limited) {
+                const items = byEgo[String(eg.egogiftId)] ?? [];
+                if (items.some((item) => Number(item.cardpackId) === packId)) {
+                  matched.push(eg);
+                }
+              }
+            }
+          } catch {
+            /* skip */
+          }
+          matched.sort((a, b) => a.egogiftId - b.egogiftId);
+          const meta = resolveCardPackMetaForFloor(packId);
+          return {
+            floor,
+            cardpackId: packId,
+            title: meta.title,
+            limitedEgoGifts: matched,
+            ...(meta.thumbnail != null && meta.thumbnail !== "" ? { thumbnail: meta.thumbnail } : {}),
+          };
+        })
+      );
+      const rows = built.filter((row) => row != null);
+      rows.sort((a, b) => a.floor - b.floor);
+      if (!cancelled) {
+        setFloorLimitedRows(rows);
+        setFloorLimitedRowsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    resultEgoGiftViewMode,
+    activeTab,
+    checkedCardPackByFloor,
+    resultEgoGifts,
+    selectedReportSchemaVersion,
+    plannedCardPackDifficultyByFloor,
+    resultCardPackDifficulty,
+    resolveCardPackMetaForFloor,
+  ]);
 
   // 저장 완료 토스트: 막 보일 때 한 번만 아래로 내려오기
   useEffect(() => {
@@ -1365,6 +1585,7 @@ export default function FavoritesPage() {
       cardPackCheckedByFloor: {} as Record<string, number>,
       plannedCardPackDifficultyByFloor: {} as Record<string, string>,
       plannedFloorRowCount: 1,
+      observedEgoGiftIds: [] as number[],
     };
     const payload = { searchJson: JSON.stringify(merged) };
     setRegistering(true);
@@ -1386,6 +1607,8 @@ export default function FavoritesPage() {
         setPlannedCardPackDifficultyByFloor({});
         setV2PlannedFloorRowCount(1);
         setCheckedEgoGiftIds([]);
+        setResultEgoGiftViewMode("keyword");
+        setObservedEgoGiftIds([]);
         setSelectedFavoriteId(null);
         await fetchFavorites();
         setToastSlideDown(false);
@@ -1418,6 +1641,9 @@ export default function FavoritesPage() {
       plannedCardPackDifficultyByFloor?: Record<string, string>;
       plannedFloorRowCount?: number;
       checkedEgoGiftIds?: number[];
+      observedEgoGiftIds?: number[];
+      resultEgoGiftViewByKeyword?: boolean;
+      resultEgoGiftViewMode?: string;
     } = {};
     if (existing) {
       try {
@@ -1439,6 +1665,12 @@ export default function FavoritesPage() {
       ),
       plannedFloorRowCount: v2PlannedFloorRowCount,
       checkedEgoGiftIds: checkedEgoGiftIds,
+      observedEgoGiftIds: observedEgoGiftIds.slice(0, 3),
+      ...(resultEgoGiftViewMode === "keyword"
+        ? {}
+        : resultEgoGiftViewMode === "flat"
+          ? { resultEgoGiftViewByKeyword: false }
+          : { resultEgoGiftViewByKeyword: false, resultEgoGiftViewMode: "floor" }),
     };
     const payload = { searchJson: JSON.stringify(merged) };
     setRegistering(true);
@@ -1474,6 +1706,8 @@ export default function FavoritesPage() {
     plannedCardPackDifficultyByFloor,
     v2PlannedFloorRowCount,
     checkedEgoGiftIds,
+    observedEgoGiftIds,
+    resultEgoGiftViewMode,
     fetchFavorites,
   ]);
 
@@ -1509,7 +1743,9 @@ export default function FavoritesPage() {
     v2PlannedFloorRowCount,
     starredEgoGiftIds,
     checkedEgoGiftIds,
+    observedEgoGiftIds,
     resultCardPackDifficulty,
+    resultEgoGiftViewMode,
   ]);
 
   const startEditTitle = (e: React.MouseEvent, item: { favoriteId: number; searchJson: string }) => {
@@ -1683,6 +1919,9 @@ export default function FavoritesPage() {
           plannedCardPackDifficultyByFloor?: Record<string, string>;
           plannedFloorRowCount?: number;
           checkedEgoGiftIds?: number[];
+          observedEgoGiftIds?: number[];
+          resultEgoGiftViewByKeyword?: boolean;
+          resultEgoGiftViewMode?: string;
         };
         v2AutosaveSkipNextRef.current = true;
         setSelectedFavoriteId(data.data.favoriteId);
@@ -1698,6 +1937,12 @@ export default function FavoritesPage() {
         setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
         setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
         setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
+        setObservedEgoGiftIds(
+          Array.isArray(parsed.observedEgoGiftIds)
+            ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
+            : [],
+        );
+        setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
         setSaveToastState("visible");
         setToastSlideDown(true);
       } else {
@@ -1736,6 +1981,8 @@ export default function FavoritesPage() {
           setPlannedCardPackDifficultyByFloor({});
           setV2PlannedFloorRowCount(1);
           setCheckedEgoGiftIds([]);
+          setResultEgoGiftViewMode("keyword");
+          setObservedEgoGiftIds([]);
         }
         await fetchFavorites();
       } else {
@@ -1864,6 +2111,9 @@ export default function FavoritesPage() {
                           plannedCardPackDifficultyByFloor?: Record<string, string>;
                           plannedFloorRowCount?: number;
                           checkedEgoGiftIds?: number[];
+                          observedEgoGiftIds?: number[];
+                          resultEgoGiftViewByKeyword?: boolean;
+                          resultEgoGiftViewMode?: string;
                         };
                         setTitleInput("");
                         setStarredEgoGiftIds(Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds : []);
@@ -1876,6 +2126,12 @@ export default function FavoritesPage() {
                         setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
                         setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
                         setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
+                        setObservedEgoGiftIds(
+                          Array.isArray(parsed.observedEgoGiftIds)
+                            ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
+                            : [],
+                        );
+                        setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
                       } catch {
                         setTitleInput("");
                         setStarredEgoGiftIds([]);
@@ -1885,6 +2141,8 @@ export default function FavoritesPage() {
                         setPlannedCardPackDifficultyByFloor({});
                         setV2PlannedFloorRowCount(1);
                         setCheckedEgoGiftIds([]);
+                        setObservedEgoGiftIds([]);
+                        setResultEgoGiftViewMode("keyword");
                       }
                     }}
                     onKeyDown={(e) => {
@@ -1903,6 +2161,9 @@ export default function FavoritesPage() {
                             plannedCardPackDifficultyByFloor?: Record<string, string>;
                             plannedFloorRowCount?: number;
                             checkedEgoGiftIds?: number[];
+                            observedEgoGiftIds?: number[];
+                            resultEgoGiftViewByKeyword?: boolean;
+                            resultEgoGiftViewMode?: string;
                           };
                           setTitleInput("");
                           setStarredEgoGiftIds(Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds : []);
@@ -1915,6 +2176,12 @@ export default function FavoritesPage() {
                           setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
                           setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
                           setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
+                          setObservedEgoGiftIds(
+                            Array.isArray(parsed.observedEgoGiftIds)
+                              ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
+                              : [],
+                          );
+                          setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
                         } catch {
                           setTitleInput("");
                           setStarredEgoGiftIds([]);
@@ -1924,6 +2191,8 @@ export default function FavoritesPage() {
                           setPlannedCardPackDifficultyByFloor({});
                           setV2PlannedFloorRowCount(1);
                           setCheckedEgoGiftIds([]);
+                          setObservedEgoGiftIds([]);
+                          setResultEgoGiftViewMode("keyword");
                         }
                       }
                     }}
@@ -2042,7 +2311,7 @@ export default function FavoritesPage() {
       }}
     >
       {/* 캡처 시 버튼 영역 숨김 (이미지에 포함되지 않도록) */}
-      <style dangerouslySetInnerHTML={{ __html: ".keyword-capture-hex .exclude-from-capture { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; border: none !important; opacity: 0 !important; pointer-events: none !important; position: absolute !important; left: -9999px !important; } .keyword-capture-hex [data-cardpack-title] { min-height: 3.5rem !important; padding-bottom: 0.375rem !important; } .keyword-capture-hex [data-cardpack-title] p:first-of-type { line-height: 1.5 !important; min-height: 3em !important; overflow: visible !important; }" }} />
+      <style dangerouslySetInnerHTML={{ __html: ".keyword-capture-hex .exclude-from-capture { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; border: none !important; opacity: 0 !important; pointer-events: none !important; position: absolute !important; left: -9999px !important; } .keyword-capture-hex [data-cardpack-title] { min-height: 3.5rem !important; padding-bottom: 0.375rem !important; } .keyword-capture-hex [data-cardpack-title] p:first-of-type { line-height: 1.5 !important; min-height: 3em !important; overflow: visible !important; } .keyword-capture-hex [data-floor-empty-notice] { overflow: visible !important; white-space: normal !important; text-overflow: clip !important; line-height: 1.625 !important; padding-bottom: 0.25rem !important; min-height: 2.75rem !important; }" }} />
       {/* 저장 완료 토스트: 최상단에서 내려왔다가 올라가는 안내 */}
       {saveToastState !== "hidden" && (
         <div
@@ -2268,7 +2537,7 @@ export default function FavoritesPage() {
                                 >
                                   진행(예정) 카드팩 목록
                                 </button>
-                                <span className="relative inline-flex shrink-0 group">
+                                <span className="relative z-[2147483647] isolate inline-flex shrink-0 group">
                                   <button
                                     type="button"
                                     className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-500 bg-red-950/70 text-[11px] font-bold leading-none text-red-300 shadow-sm hover:bg-red-900/80 hover:text-red-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
@@ -2280,7 +2549,7 @@ export default function FavoritesPage() {
                                   <div
                                     id="v2-planned-cardpack-help-tooltip"
                                     role="tooltip"
-                                    className="pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-[70] w-max max-w-[min(20rem,calc(100vw-3rem))] -translate-x-1/2 rounded-xl border border-[#b8860b]/50 bg-[#1a1a1f] px-3 py-2.5 text-left text-[11px] sm:text-xs leading-snug text-gray-200 shadow-[0_8px_24px_rgba(0,0,0,0.55)] opacity-0 transition-opacity duration-200 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible"
+                                    className="pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-[2147483647] w-max max-w-[min(20rem,calc(100vw-3rem))] -translate-x-1/2 rounded-xl border border-[#b8860b]/50 bg-[#1a1a1f] px-3 py-2.5 text-left text-[11px] sm:text-xs leading-snug text-gray-200 shadow-[0_8px_24px_rgba(0,0,0,0.55)] opacity-0 transition-opacity duration-200 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible"
                                   >
                                     <div className="flex flex-col gap-2">
                                       <p>1행 1~5층, 추가 시 2행 6~10층·3행 11~15층입니다.</p>
@@ -2676,6 +2945,16 @@ export default function FavoritesPage() {
                             </div>
                           </div>
                         )}
+                        {selectedFavoriteId !== null && (
+                          <ObservedEgoGiftsSection
+                            catalog={observableEgoGiftCatalog}
+                            catalogLoading={observableEgoGiftCatalogLoading}
+                            selectedIds={observedEgoGiftIds}
+                            onChange={setObservedEgoGiftIds}
+                            imageBaseUrl={RESULT_EGOGIFT_BASE_URL}
+                            onOpenEgoGiftByName={(name) => egoGiftPreviewOpenRef.current?.(name)}
+                          />
+                        )}
                         {resultEgoGiftsLoading ? (
                       <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
                         <p className="text-gray-400">불러오는 중...</p>
@@ -2974,28 +3253,48 @@ export default function FavoritesPage() {
                       )}
                       {starredEgoGiftIds.length > 0 && (
                       <div ref={allResultRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6">
-                        <div className="flex flex-wrap items-center gap-2 border-b border-[#b8860b]/40 pb-4 mb-4">
+                        <div className="border-b border-[#b8860b]/40 pb-4 mb-4">
+                          <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
                           <h2 className="text-lg font-semibold text-yellow-300">
-                            키워드별 에고기프트
+                            에고기프트
                           </h2>
-                          <div className="exclude-from-capture flex flex-wrap items-center gap-2 flex-1">
+                          <div className="exclude-from-capture flex flex-wrap items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => captureAllResultAsImage(false)}
-                            className="px-3 py-1.5 text-sm rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 transition-colors"
-                            title="전체 키워드 + 합성 조합식 이미지로 저장"
+                            onClick={() => setResultEgoGiftViewMode("keyword")}
+                            className={`shrink-0 px-2 py-1.5 text-sm rounded border transition-colors flex items-center gap-1 ${
+                              resultEgoGiftViewMode === "keyword"
+                                ? "text-amber-200 border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
+                                : "text-gray-300 border-gray-400/40 hover:bg-white/10"
+                            }`}
+                            title="에고기프트를 키워드별로 나누어 표시합니다."
                           >
-                            전체 에고기프트 다운로드
+                            키워드별 보기
                           </button>
                           <button
                             type="button"
-                            onClick={() => captureAllResultAsImage(true)}
-                            className="px-3 py-1.5 text-sm rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 transition-colors"
-                            title="전체 키워드만 저장 (합성 조합식 제외)"
+                            onClick={() => setResultEgoGiftViewMode("flat")}
+                            className={`shrink-0 px-2 py-1.5 text-sm rounded border transition-colors flex items-center gap-1 ${
+                              resultEgoGiftViewMode === "flat"
+                                ? "text-amber-200 border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
+                                : "text-gray-300 border-gray-400/40 hover:bg-white/10"
+                            }`}
+                            title="에고기프트를 한 그리드로 모아 표시합니다."
                           >
-                            전체 에고기프트 다운로드(합성제외)
+                            모아보기
                           </button>
-                          <div className="ml-auto flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setResultEgoGiftViewMode("floor")}
+                            className={`shrink-0 px-2 py-1.5 text-sm rounded border transition-colors flex items-center gap-1 ${
+                              resultEgoGiftViewMode === "floor"
+                                ? "text-amber-200 border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
+                                : "text-gray-300 border-gray-400/40 hover:bg-white/10"
+                            }`}
+                            title="모아보기와 같이 한 그리드로 표시하고, 층별 선택 카드팩 기준 한정 에고기프트를 층 순으로 추가합니다."
+                          >
+                            층별 보기
+                          </button>
                           <button
                             type="button"
                             onClick={() => setResultSimplified((prev) => !prev)}
@@ -3003,68 +3302,6 @@ export default function FavoritesPage() {
                             title={resultSimplified ? "상세 보기로 원복" : "이름·출현카드팩·합성 여부만 표시"}
                           >
                             {resultSimplified ? "상세 보기" : "간소화"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const allExpanded = resultEgoGiftsByKeyword.every(({ keyword }) => keywordGiftExpandedByKeyword[keyword] !== false);
-                              if (allExpanded) {
-                                setKeywordGiftExpandedByKeyword(
-                                  resultEgoGiftsByKeyword.reduce<Record<string, boolean>>((acc, { keyword }) => ({ ...acc, [keyword]: false }), {})
-                                );
-                              } else {
-                                setKeywordGiftExpandedByKeyword({});
-                              }
-                            }}
-                            className="shrink-0 px-2 py-1.5 text-sm rounded text-amber-200 border border-amber-400/50 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
-                            title={resultEgoGiftsByKeyword.every(({ keyword }) => keywordGiftExpandedByKeyword[keyword] !== false) ? "키워드별 에고기프트 전체 접기" : "키워드별 에고기프트 전체 펼치기"}
-                          >
-                            {resultEgoGiftsByKeyword.every(({ keyword }) => keywordGiftExpandedByKeyword[keyword] !== false) ? (
-                              <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-                                </svg>
-                                <span>에고기프트 전체 접기</span>
-                              </>
-                            ) : (
-                              <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                </svg>
-                                <span>에고기프트 전체 펼치기</span>
-                              </>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const allExpanded = resultEgoGiftsByKeyword.every(({ keyword }) => synthesisExpandedByKeyword[keyword] !== false);
-                              if (allExpanded) {
-                                setSynthesisExpandedByKeyword(
-                                  resultEgoGiftsByKeyword.reduce<Record<string, boolean>>((acc, { keyword }) => ({ ...acc, [keyword]: false }), {})
-                                );
-                              } else {
-                                setSynthesisExpandedByKeyword({});
-                              }
-                            }}
-                            className="shrink-0 px-2 py-1.5 text-sm rounded text-purple-300 border border-purple-400/40 hover:bg-purple-500/20 transition-colors flex items-center gap-1"
-                            title={resultEgoGiftsByKeyword.every(({ keyword }) => synthesisExpandedByKeyword[keyword] !== false) ? "합성 조합식 전체 접기" : "합성 조합식 전체 펼치기"}
-                          >
-                            {resultEgoGiftsByKeyword.every(({ keyword }) => synthesisExpandedByKeyword[keyword] !== false) ? (
-                              <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-                                </svg>
-                                <span>합성 전체 접기</span>
-                              </>
-                            ) : (
-                              <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                                </svg>
-                                <span>합성 전체 펼치기</span>
-                              </>
-                            )}
                           </button>
                           <button
                             type="button"
@@ -3076,29 +3313,377 @@ export default function FavoritesPage() {
                           </button>
                           </div>
                           </div>
+                          {resultEgoGiftViewMode === "flat" || resultEgoGiftViewMode === "floor" ? (
+                            <div className="exclude-from-capture flex min-h-[2.25rem] w-full flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => captureAllResultAsImage(false)}
+                                  className="px-3 py-1.5 text-sm rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 transition-colors"
+                                  title="전체 키워드 + 합성 조합식 이미지로 저장"
+                                >
+                                  전체 에고기프트 다운로드
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => captureAllResultAsImage(true)}
+                                  className="px-3 py-1.5 text-sm rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 transition-colors"
+                                  title="전체 키워드만 저장 (합성 조합식 제외)"
+                                >
+                                  전체 에고기프트 다운로드(합성제외)
+                                </button>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                {resultEgoGiftViewMode === "floor" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const keys = floorViewSynthesisSectionKeys;
+                                      if (floorViewSynthesisAllExpanded) {
+                                        setSynthesisExpandedByKeyword((prev) => ({
+                                          ...prev,
+                                          ...keys.reduce<Record<string, boolean>>((acc, k) => ({ ...acc, [k]: false }), {}),
+                                        }));
+                                      } else {
+                                        setSynthesisExpandedByKeyword((prev) => {
+                                          const next = { ...prev };
+                                          for (const k of keys) delete next[k];
+                                          return next;
+                                        });
+                                      }
+                                    }}
+                                    className="shrink-0 px-2 py-1.5 text-sm rounded text-purple-300 border border-purple-400/40 hover:bg-purple-500/20 transition-colors flex items-center gap-1"
+                                    title={
+                                      floorViewSynthesisAllExpanded
+                                        ? "층별 조합식·하단 모아보기 조합식 모두 접기"
+                                        : "층별 조합식·하단 모아보기 조합식 모두 펼치기"
+                                    }
+                                  >
+                                    {floorViewSynthesisAllExpanded ? (
+                                      <>
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                                        </svg>
+                                        <span>합성 전체 접기</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                        <span>합성 전체 펼치기</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setFlatSortByKeyword((v) => !v)}
+                                  className={`shrink-0 px-3 py-1.5 text-sm rounded border transition-colors ${
+                                    flatSortByKeyword
+                                      ? "text-amber-200 border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
+                                      : "text-gray-300 border-gray-400/40 hover:bg-white/10"
+                                  }`}
+                                  title={
+                                    flatSortByKeyword
+                                      ? "즐겨찾기에 넣은 순서로 표시합니다."
+                                      : "키워드 묶음 순서(화상→…→기타)로 표시합니다."
+                                  }
+                                >
+                                  키워드별 정렬
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setFlatTierSort((s) => (s === "off" ? "desc" : s === "desc" ? "asc" : "off"))
+                                  }
+                                  className={`shrink-0 px-3 py-1.5 text-sm rounded border transition-colors ${
+                                    flatTierSort !== "off"
+                                      ? "text-violet-200 border-violet-400/55 bg-violet-500/15 hover:bg-violet-500/25"
+                                      : "text-gray-300 border-gray-400/40 hover:bg-white/10"
+                                  }`}
+                                  title={
+                                    flatTierSort === "off"
+                                      ? "첫 클릭: 등급 높은 순(↓), 두 번째: 낮은 순(↑), 세 번째: 해제"
+                                      : flatTierSort === "desc"
+                                        ? "등급 내림차순 적용 중. 클릭하면 오름차순."
+                                        : "등급 오름차순 적용 중. 클릭하면 해제."
+                                  }
+                                >
+                                  {flatTierSort === "off"
+                                    ? "등급별 정렬"
+                                    : flatTierSort === "desc"
+                                      ? "등급별 (↓)"
+                                      : "등급별 (↑)"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="exclude-from-capture flex min-h-[2.25rem] w-full flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => captureAllResultAsImage(false)}
+                                  className="px-3 py-1.5 text-sm rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 transition-colors"
+                                  title="전체 키워드 + 합성 조합식 이미지로 저장"
+                                >
+                                  전체 에고기프트 다운로드
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => captureAllResultAsImage(true)}
+                                  className="px-3 py-1.5 text-sm rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 transition-colors"
+                                  title="전체 키워드만 저장 (합성 조합식 제외)"
+                                >
+                                  전체 에고기프트 다운로드(합성제외)
+                                </button>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const allExpanded = resultEgoGiftsByKeyword.every(({ keyword }) => keywordGiftExpandedByKeyword[keyword] !== false);
+                                    if (allExpanded) {
+                                      setKeywordGiftExpandedByKeyword(
+                                        resultEgoGiftsByKeyword.reduce<Record<string, boolean>>((acc, { keyword }) => ({ ...acc, [keyword]: false }), {})
+                                      );
+                                    } else {
+                                      setKeywordGiftExpandedByKeyword({});
+                                    }
+                                  }}
+                                  className="shrink-0 px-2 py-1.5 text-sm rounded text-amber-200 border border-amber-400/50 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                                  title={resultEgoGiftsByKeyword.every(({ keyword }) => keywordGiftExpandedByKeyword[keyword] !== false) ? "키워드별 에고기프트 전체 접기" : "키워드별 에고기프트 전체 펼치기"}
+                                >
+                                  {resultEgoGiftsByKeyword.every(({ keyword }) => keywordGiftExpandedByKeyword[keyword] !== false) ? (
+                                    <>
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                                      </svg>
+                                      <span>에고기프트 전체 접기</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                      <span>에고기프트 전체 펼치기</span>
+                                    </>
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const allExpanded = resultEgoGiftsByKeyword.every(({ keyword }) => synthesisExpandedByKeyword[keyword] !== false);
+                                    if (allExpanded) {
+                                      setSynthesisExpandedByKeyword(
+                                        resultEgoGiftsByKeyword.reduce<Record<string, boolean>>((acc, { keyword }) => ({ ...acc, [keyword]: false }), {})
+                                      );
+                                    } else {
+                                      setSynthesisExpandedByKeyword({});
+                                    }
+                                  }}
+                                  className="shrink-0 px-2 py-1.5 text-sm rounded text-purple-300 border border-purple-400/40 hover:bg-purple-500/20 transition-colors flex items-center gap-1"
+                                  title={resultEgoGiftsByKeyword.every(({ keyword }) => synthesisExpandedByKeyword[keyword] !== false) ? "합성 조합식 전체 접기" : "합성 조합식 전체 펼치기"}
+                                >
+                                  {resultEgoGiftsByKeyword.every(({ keyword }) => synthesisExpandedByKeyword[keyword] !== false) ? (
+                                    <>
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                                      </svg>
+                                      <span>합성 전체 접기</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                      <span>합성 전체 펼치기</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        {resultEgoGiftsByKeyword.map(({ keyword, egogifts }, keywordIndex) => (
-                          <ResultKeywordSection
-                            key={keyword}
-                            keyword={keyword}
-                            egogifts={egogifts}
-                            keywordIndex={keywordIndex}
-                            resultSimplified={resultSimplified}
-                            keywordGiftExpandedByKeyword={keywordGiftExpandedByKeyword}
-                            setKeywordGiftExpandedByKeyword={setKeywordGiftExpandedByKeyword}
-                            synthesisExpandedByKeyword={synthesisExpandedByKeyword}
-                            setSynthesisExpandedByKeyword={setSynthesisExpandedByKeyword}
-                            synthesisRecipes={synthesisRecipes}
-                            resultEgoGifts={resultEgoGifts}
-                            checkedEgoGiftIds={checkedEgoGiftIds}
-                            onToggleEgoGiftCheck={toggleEgoGiftCheck}
-                            onRemoveStarredEgoGift={removeStarredEgoGift}
-                            sectionRef={(el) => { keywordSectionRefs.current[keyword] = el; }}
-                            synthesisRef={(el) => { synthesisSectionRefs.current[keyword] = el; }}
-                            onCaptureSection={captureSectionAsImage}
-                            egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
-                          />
-                        )) }
+                        {resultEgoGiftViewMode === "keyword"
+                          ? resultEgoGiftsByKeyword.map(({ keyword, egogifts }, keywordIndex) => (
+                              <ResultKeywordSection
+                                key={keyword}
+                                keyword={keyword}
+                                egogifts={egogifts}
+                                keywordIndex={keywordIndex}
+                                resultSimplified={resultSimplified}
+                                keywordGiftExpandedByKeyword={keywordGiftExpandedByKeyword}
+                                setKeywordGiftExpandedByKeyword={setKeywordGiftExpandedByKeyword}
+                                synthesisExpandedByKeyword={synthesisExpandedByKeyword}
+                                setSynthesisExpandedByKeyword={setSynthesisExpandedByKeyword}
+                                synthesisRecipes={synthesisRecipes}
+                                resultEgoGifts={resultEgoGifts}
+                                checkedEgoGiftIds={checkedEgoGiftIds}
+                                onToggleEgoGiftCheck={toggleEgoGiftCheck}
+                                onRemoveStarredEgoGift={removeStarredEgoGift}
+                                sectionRef={(el) => {
+                                  keywordSectionRefs.current[keyword] = el;
+                                }}
+                                synthesisRef={(el) => {
+                                  synthesisSectionRefs.current[keyword] = el;
+                                }}
+                                onCaptureSection={captureSectionAsImage}
+                                egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                              />
+                            ))
+                          : resultEgoGiftsFlatDisplay.length > 0 || showFloorLimitedEgoSection ? (
+                              <>
+                                {showFloorLimitedEgoSection && (
+                                    <>
+                                        {floorLimitedRowsLoading ? (
+                                          <p className="exclude-from-capture mb-6 text-sm text-gray-400">조회 중…</p>
+                                        ) : (
+                                          /* 층별 한정 본문은 전체 캡처에 포함(부모에 keyword-capture-hex 시 숨기면 화면이 모아보기만 남은 것처럼 보임) */
+                                          <div className="mb-6 space-y-4">
+                                            {floorLimitedRowsForDisplay.map((row) =>
+                                              row.limitedEgoGifts.length === 0 ? (
+                                                <div
+                                                  key={`floor-lim-${row.floor}-${row.cardpackId}`}
+                                                  className="rounded-lg border border-[#b8860b]/40 bg-[#131316]/90 px-3 py-3 md:px-4 md:py-3.5"
+                                                >
+                                                  <div className="mb-2 text-sm font-bold tabular-nums text-amber-300/95">{row.floor}층</div>
+                                                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                    카드팩 및 에고기프트
+                                                  </div>
+                                                  <p
+                                                    data-floor-empty-notice
+                                                    className="text-sm leading-relaxed text-gray-400 break-words [overflow-wrap:anywhere]"
+                                                    title={`${row.floor}층 · ${row.title} — 선택한 카드팩으로 획득할 한정 에고기프트가 없습니다.`}
+                                                  >
+                                                    <span className="text-gray-300">{row.title}</span>
+                                                    <span className="text-gray-500"> — </span>
+                                                    선택한 카드팩으로 획득할 한정 에고기프트가 없습니다.
+                                                  </p>
+                                                </div>
+                                              ) : (
+                                                <div
+                                                  key={`floor-lim-${row.floor}-${row.cardpackId}`}
+                                                  className="min-w-0 max-w-full overflow-hidden rounded-lg border border-[#b8860b]/40 bg-[#131316]/90 p-3 md:p-4"
+                                                >
+                                                  <div className="mb-2 text-sm font-bold tabular-nums text-amber-300/95">{row.floor}층</div>
+                                                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                    카드팩 및 에고기프트
+                                                  </div>
+                                                  <div className="flex min-h-[11rem] flex-col items-stretch gap-4 sm:flex-row">
+                                                    <div className="mx-auto flex w-full max-w-[10rem] shrink-0 flex-col self-stretch sm:mx-0 sm:w-[9.5rem] sm:max-w-none">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => cardPackDetailOpenRef.current?.open(row.cardpackId)}
+                                                        className="flex h-full min-h-0 flex-1 flex-col gap-2 rounded-lg border border-[#b8860b]/35 bg-[#1a1a1d]/90 p-2 text-left transition-colors hover:border-amber-400/50"
+                                                        title="카드팩 상세"
+                                                      >
+                                                        <div className="relative min-h-[9rem] w-full flex-1 basis-0 overflow-hidden rounded bg-[#0d0d10]">
+                                                          {row.thumbnail ? (
+                                                            <img
+                                                              src={RESULT_EGOGIFT_BASE_URL + row.thumbnail}
+                                                              alt={row.title}
+                                                              className="absolute inset-0 h-full w-full object-cover"
+                                                              onError={(e) => {
+                                                                (e.target as HTMLImageElement).style.display = "none";
+                                                              }}
+                                                            />
+                                                          ) : (
+                                                            <span className="absolute inset-0 flex items-center justify-center px-1 text-center text-[10px] text-gray-600">
+                                                              이미지 없음
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                        <p className="w-full shrink-0 break-words text-center text-xs font-medium leading-snug text-gray-200 sm:text-left">
+                                                          {row.title}
+                                                        </p>
+                                                      </button>
+                                                    </div>
+                                                    <div className="flex min-h-0 min-w-0 flex-1 flex-col self-stretch">
+                                                      <ResultKeywordSection
+                                                        keyword={`__floor_lim_${row.floor}__`}
+                                                        variant="flat"
+                                                        omitSynthesis
+                                                        fillParentHeight
+                                                        egogifts={row.limitedEgoGifts}
+                                                        keywordIndex={0}
+                                                        resultSimplified={resultSimplified}
+                                                        keywordGiftExpandedByKeyword={keywordGiftExpandedByKeyword}
+                                                        setKeywordGiftExpandedByKeyword={setKeywordGiftExpandedByKeyword}
+                                                        synthesisExpandedByKeyword={synthesisExpandedByKeyword}
+                                                        setSynthesisExpandedByKeyword={setSynthesisExpandedByKeyword}
+                                                        synthesisRecipes={synthesisRecipes}
+                                                        resultEgoGifts={resultEgoGifts}
+                                                        checkedEgoGiftIds={checkedEgoGiftIds}
+                                                        onToggleEgoGiftCheck={toggleEgoGiftCheck}
+                                                        onRemoveStarredEgoGift={removeStarredEgoGift}
+                                                        sectionRef={() => {}}
+                                                        synthesisRef={() => {}}
+                                                        onCaptureSection={captureSectionAsImage}
+                                                        egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                                                      />
+                                                    </div>
+                                                  </div>
+                                                  {filterSynthesisRecipesForEgoIds(
+                                                    synthesisRecipes,
+                                                    row.limitedEgoGifts.map((e) => e.egogiftId),
+                                                  ).length > 0 ? (
+                                                    <div className="mt-4 min-w-0 max-w-full border-t border-[#b8860b]/30 pt-3">
+                                                      <div className="mb-2 text-xs font-semibold text-purple-300/95">조합식</div>
+                                                      <SynthesisRecipesSubsetBlock
+                                                        sectionKey={`__floor_lim_syn_${row.floor}__`}
+                                                        relevantEgoIds={row.limitedEgoGifts.map((e) => e.egogiftId)}
+                                                        synthesisRecipes={synthesisRecipes}
+                                                        resultEgoGifts={resultEgoGifts}
+                                                        resultSimplified={resultSimplified}
+                                                        synthesisExpandedByKeyword={synthesisExpandedByKeyword}
+                                                        setSynthesisExpandedByKeyword={setSynthesisExpandedByKeyword}
+                                                        onCaptureSection={captureSectionAsImage}
+                                                        synthesisRef={(el) => {
+                                                          synthesisSectionRefs.current[`__floor_lim_syn_${row.floor}__`] = el;
+                                                        }}
+                                                        egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                                                        showHeaderRow={false}
+                                                        layout="floor"
+                                                      />
+                                                    </div>
+                                                  ) : null}
+                                                </div>
+                                              )
+                                            )}
+                                          </div>
+                                        )}
+                                    </>
+                                  )}
+                                {resultEgoGiftsFlatDisplayExcludingFloorLimited.length > 0 && (
+                                <ResultKeywordSection
+                                  key={RESULT_EGO_FLAT_SECTION_KEY}
+                                  keyword={RESULT_EGO_FLAT_SECTION_KEY}
+                                  variant="flat"
+                                  egogifts={resultEgoGiftsFlatDisplayExcludingFloorLimited}
+                                  keywordIndex={0}
+                                  resultSimplified={resultSimplified}
+                                  keywordGiftExpandedByKeyword={keywordGiftExpandedByKeyword}
+                                  setKeywordGiftExpandedByKeyword={setKeywordGiftExpandedByKeyword}
+                                  synthesisExpandedByKeyword={synthesisExpandedByKeyword}
+                                  setSynthesisExpandedByKeyword={setSynthesisExpandedByKeyword}
+                                  synthesisRecipes={synthesisRecipes}
+                                  resultEgoGifts={resultEgoGifts}
+                                  checkedEgoGiftIds={checkedEgoGiftIds}
+                                  onToggleEgoGiftCheck={toggleEgoGiftCheck}
+                                  onRemoveStarredEgoGift={removeStarredEgoGift}
+                                  sectionRef={(el) => {
+                                    keywordSectionRefs.current[RESULT_EGO_FLAT_SECTION_KEY] = el;
+                                  }}
+                                  synthesisRef={(el) => {
+                                    synthesisSectionRefs.current[RESULT_EGO_FLAT_SECTION_KEY] = el;
+                                  }}
+                                  onCaptureSection={captureSectionAsImage}
+                                  egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                                />
+                                )}
+                              </>
+                            ) : null}
                       </div>
                       )}
                       </>

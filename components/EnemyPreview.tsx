@@ -107,6 +107,8 @@ interface EnemyPreviewProps {
   allKeywords?: KeywordData[];
   onClose: () => void;
   onEdit?: () => void;
+  /** 포털 오버레이 z-index (카드팩·에고 모달 위에 겹칠 때) */
+  overlayZIndex?: number;
 }
 
 const resistanceOptions = [
@@ -351,7 +353,13 @@ function getInitialCollapsedState(enemyData: EnemyPreviewProps["enemyData"]) {
   return { bodyPartIds, skillIds };
 }
 
-export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onEdit }: EnemyPreviewProps) {
+export default function EnemyPreview({
+  enemyData,
+  allKeywords = [],
+  onClose,
+  onEdit,
+  overlayZIndex = 10000,
+}: EnemyPreviewProps) {
   const [mounted, setMounted] = useState(false);
   const [collapsedSkillIds, setCollapsedSkillIds] = useState<Set<number>>(() =>
     getInitialCollapsedState(enemyData).skillIds
@@ -427,7 +435,8 @@ export default function EnemyPreview({ enemyData, allKeywords = [], onClose, onE
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-black/80 z-[10000] flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/80 flex items-center justify-center p-4"
+      style={{ zIndex: overlayZIndex }}
       onClick={onClose}
     >
       <div

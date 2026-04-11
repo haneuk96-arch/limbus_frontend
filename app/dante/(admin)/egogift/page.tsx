@@ -69,9 +69,10 @@ interface EgoGiftDetail {
     eventType: number;
   }>;
   cardPackAppearances?: Array<{
-    cardpackId: number;
-    cardpackTitle: string;
-    categoryName: string | null;
+    cardpackId?: number | null;
+    cardpackTitle?: string | null;
+    categoryName?: string | null;
+    thumbnailPath?: string | null;
   }>;
 }
 
