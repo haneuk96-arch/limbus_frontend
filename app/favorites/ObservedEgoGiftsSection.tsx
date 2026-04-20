@@ -46,6 +46,7 @@ type Props = {
   onChange: (nextIds: number[]) => void;
   imageBaseUrl: string;
   onOpenEgoGiftByName: (giftName: string) => void;
+  readOnly?: boolean;
 };
 
 const MAX_OBSERVED = 3;
@@ -154,6 +155,7 @@ export function ObservedEgoGiftsSection({
   onChange,
   imageBaseUrl,
   onOpenEgoGiftByName,
+  readOnly = false,
 }: Props) {
   const [pickQuery, setPickQuery] = useState("");
   /** null = 전체 키워드 */
@@ -242,6 +244,7 @@ export function ObservedEgoGiftsSection({
                   className="absolute -right-1.5 -top-1.5 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-red-400/60 bg-[#1a0a0a] text-red-200 text-xs font-bold hover:bg-red-950/90"
                   title="등록 해제"
                   aria-label="등록 해제"
+                  hidden={readOnly}
                 >
                   ×
                 </button>
@@ -263,7 +266,7 @@ export function ObservedEgoGiftsSection({
         </div>
       )}
 
-      {selectedIds.length < MAX_OBSERVED && (
+      {!readOnly && selectedIds.length < MAX_OBSERVED && (
         <div className="rounded-lg border border-[#b8860b]/25 bg-[#0d0d0f]/60 p-3">
           <label htmlFor="observed-egogift-search" className="mb-2 block text-xs font-medium text-gray-400">
             에고기프트 추가 ({selectedIds.length}/{MAX_OBSERVED})

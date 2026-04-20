@@ -28,6 +28,26 @@ interface EgoGift {
   limitedCategoryNames?: string[];
 }
 
+interface LimitedCardPackItem {
+  cardpackId: number;
+  title: string;
+  themeType?: number;
+  thumbnail?: string;
+}
+
+const SYNTHESIS_MATERIALS_CACHE_KEY = "egogift-synthesis-materials-cache-v1";
+const SYNTHESIS_MATERIALS_CACHE_TTL_MS = 60 * 60 * 1000; // 1시간
+
+const CARDPACK_THEME_LABELS: Record<number, string> = {
+  1: "주요 이야기",
+  2: "그 밖의 이야기",
+  3: "공격 유형",
+  4: "죄악 속성",
+  5: "키워드 속성",
+  6: "익스트림",
+  7: "기간한정",
+};
+
 interface EgoGiftDetail {
   egogift: {
     egogiftId: number;
@@ -91,6 +111,8 @@ export interface EgoGiftPageContentProps {
   onStarClick?: (egogiftId: number) => void;
   /** 즐겨찾기 결과 탭에서 에고기프트 클릭 시 상세 모달 열기용 (giftName 전달) */
   openEgoGiftPreviewRef?: React.MutableRefObject<((giftName: string) => void) | null>;
+  /** true일 때만 합성재료 배치 프리로드 수행 (던전보고서 전용) */
+  enableSynthesisMaterialsPrefetch?: boolean;
 }
 
 /** 해시태그 드롭다운 패널 내용 (인라인/포탈 공용) */
@@ -253,7 +275,76 @@ function HashtagDropdownPanel({
   );
 }
 
-export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftIds = [], onStarClick, openEgoGiftPreviewRef }: EgoGiftPageContentProps) {
+function LimitedCardPackDropdownPanel({
+  contentRef,
+  className,
+  groupedLimitedCardPacksByTheme,
+  selectedLimitedCardPackIds,
+  setSelectedLimitedCardPackIds,
+  limitedCardPacksLoading,
+  filteredLimitedCardPackCount,
+}: {
+  contentRef?: React.RefObject<HTMLDivElement | null>;
+  className?: string;
+  groupedLimitedCardPacksByTheme: Record<string, LimitedCardPackItem[]>;
+  selectedLimitedCardPackIds: number[];
+  setSelectedLimitedCardPackIds: React.Dispatch<React.SetStateAction<number[]>>;
+  limitedCardPacksLoading: boolean;
+  filteredLimitedCardPackCount: number;
+}) {
+  return (
+    <div
+      ref={contentRef}
+      className={`p-3 bg-[#2a2a2d] border border-[#b8860b]/40 rounded overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] shadow-lg h-full ${className || ""}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {limitedCardPacksLoading ? (
+        <div className="text-sm text-gray-400">한정 카드팩 불러오는 중...</div>
+      ) : filteredLimitedCardPackCount === 0 ? (
+        <div className="text-sm text-gray-400">조건에 맞는 한정 카드팩이 없습니다.</div>
+      ) : (
+        <div className="space-y-3">
+          {Object.entries(groupedLimitedCardPacksByTheme).map(([themeLabel, packs]) => (
+            <div key={themeLabel}>
+              <div className="text-xs text-yellow-400 mb-1.5 font-semibold">{themeLabel}</div>
+              <div className="flex flex-wrap gap-2">
+                {packs.map((pack) => (
+                  <button
+                    key={pack.cardpackId}
+                    onClick={() => {
+                      setSelectedLimitedCardPackIds((prev) =>
+                        prev.includes(pack.cardpackId)
+                          ? prev.filter((id) => id !== pack.cardpackId)
+                          : [...prev, pack.cardpackId]
+                      );
+                    }}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      selectedLimitedCardPackIds.includes(pack.cardpackId)
+                        ? "bg-yellow-400 text-black font-semibold"
+                        : "bg-[#242427] text-gray-300 hover:bg-[#3a3a3d]"
+                    }`}
+                    title={pack.title}
+                  >
+                    {pack.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function EgoGiftPageContent({
+  slotAboveSearch,
+  embedded,
+  starredEgoGiftIds = [],
+  onStarClick,
+  openEgoGiftPreviewRef,
+  enableSynthesisMaterialsPrefetch = false,
+}: EgoGiftPageContentProps) {
   // 에고기프트 관련 상태
   const [allEgoGiftsFull, setAllEgoGiftsFull] = useState<EgoGift[]>([]);  // 전체 목록 (필터링 전)
   const [egogifts, setEgoGifts] = useState<EgoGift[]>([]);  // 필터링된 목록
@@ -276,9 +367,20 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
   const [hashtagDropdownPosition, setHashtagDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const hashtagDropdownRef = useRef<HTMLDivElement>(null);
   const hashtagDropdownContentRef = useRef<HTMLDivElement>(null);
+  const limitedCardPackDropdownRef = useRef<HTMLDivElement>(null);
+  const limitedCardPackDropdownContentRef = useRef<HTMLDivElement>(null);
   const searchConditionsRef = useRef<HTMLDivElement>(null);
   const [selectedHashtagIds, setSelectedHashtagIds] = useState<number[]>([]);
   const [tagOperator, setTagOperator] = useState<"OR" | "AND">("OR");
+  const [limitedCardPacksOpen, setLimitedCardPacksOpen] = useState(false);
+  const [limitedCardPackSearchText, setLimitedCardPackSearchText] = useState("");
+  const [limitedCardPackDropdownPosition, setLimitedCardPackDropdownPosition] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [limitedCardPacksLoading, setLimitedCardPacksLoading] = useState(false);
+  const [limitedCardPacks, setLimitedCardPacks] = useState<LimitedCardPackItem[]>([]);
+  const [selectedLimitedCardPackIds, setSelectedLimitedCardPackIds] = useState<number[]>([]);
+  const [selectedLimitedCardPackEgogiftIdMap, setSelectedLimitedCardPackEgogiftIdMap] = useState<Record<number, number[]>>({});
+  const limitedCardPackEgogiftCacheRef = useRef<Record<number, number[]>>({});
+  const limitedCardPackEgogiftInFlightRef = useRef<Set<number>>(new Set());
   const [selectedKeywordIds, setSelectedKeywordIds] = useState<number[]>([]);
   const [includeUniversalKeyword, setIncludeUniversalKeyword] = useState(false);
   const [selectedAttrKeywordIds, setSelectedAttrKeywordIds] = useState<number[]>([]);  // 속성 키워드 (category_id = 9)
@@ -292,6 +394,34 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [editingFavoriteId, setEditingFavoriteId] = useState<number | null>(null);
   const [editingFavoriteName, setEditingFavoriteName] = useState<string>("");
+
+  const fetchLimitedEgogiftIdsForCardpack = async (
+    cardpackId: number
+  ): Promise<{ cardpackId: number; egogiftIds: number[]; ok: boolean }> => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/cardpack/${cardpackId}/egogifts`, {
+        credentials: "include",
+      });
+      if (!res.ok) return { cardpackId, egogiftIds: [], ok: false };
+      const data = await res.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      const ids = items
+        .filter((item: any) => String(item.limitedYn || "").toUpperCase() === "Y")
+        .map((item: any) => Number(item.egogiftId))
+        .filter((id: number) => !Number.isNaN(id) && id > 0);
+      return { cardpackId, egogiftIds: ids, ok: true };
+    } catch {
+      return { cardpackId, egogiftIds: [], ok: false };
+    }
+  };
+
+  const selectedLimitedCardPackEgoGiftIdSet = useMemo(() => {
+    const set = new Set<number>();
+    selectedLimitedCardPackIds.forEach((cardpackId) => {
+      (selectedLimitedCardPackEgogiftIdMap[cardpackId] || []).forEach((egogiftId) => set.add(egogiftId));
+    });
+    return set;
+  }, [selectedLimitedCardPackIds, selectedLimitedCardPackEgogiftIdMap]);
 
   // 해시태그를 카테고리별로 그룹화
   const groupedHashtags = useMemo(() => {
@@ -325,6 +455,27 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
     return grouped;
   }, [allHashtags]);
 
+  const filteredLimitedCardPacks = useMemo(() => {
+    const query = limitedCardPackSearchText.trim().toLowerCase();
+    if (!query) return limitedCardPacks;
+    return limitedCardPacks.filter((pack) => pack.title.toLowerCase().includes(query));
+  }, [limitedCardPacks, limitedCardPackSearchText]);
+
+  const groupedLimitedCardPacksByTheme = useMemo(() => {
+    const grouped: Record<string, LimitedCardPackItem[]> = {};
+    filteredLimitedCardPacks.forEach((pack) => {
+      const themeLabel = pack.themeType ? CARDPACK_THEME_LABELS[pack.themeType] || `테마 ${pack.themeType}` : "기타";
+      if (!grouped[themeLabel]) {
+        grouped[themeLabel] = [];
+      }
+      grouped[themeLabel].push(pack);
+    });
+    Object.keys(grouped).forEach((theme) => {
+      grouped[theme].sort((a, b) => a.title.localeCompare(b.title, "ko"));
+    });
+    return grouped;
+  }, [filteredLimitedCardPacks]);
+
   // 카테고리 코드를 표시 이름으로 변환하는 함수
   const getCategoryDisplayName = (code: string): string => {
     const category = HASHTAG_CATEGORIES.find((cat) => cat.code === code);
@@ -349,6 +500,145 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
     ]).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 한정 에고기프트가 출현하는 카드팩 목록(테마 포함) 조회
+  useEffect(() => {
+    const limitedEgogiftIds = allEgoGiftsFull
+      .filter((eg) => Array.isArray(eg.limitedCategoryNames) && eg.limitedCategoryNames.length > 0)
+      .map((eg) => eg.egogiftId);
+
+    if (limitedEgogiftIds.length === 0) {
+      setLimitedCardPacks([]);
+      setSelectedLimitedCardPackIds([]);
+      setSelectedLimitedCardPackEgogiftIdMap({});
+      return;
+    }
+
+    const query = [
+      "difficulties=노말",
+      "difficulties=하드",
+      "difficulties=익스트림",
+      ...limitedEgogiftIds.map((id) => `egogiftIds=${id}`),
+    ].join("&");
+
+    let cancelled = false;
+    setLimitedCardPacksLoading(true);
+    fetch(`${API_BASE_URL}/user/cardpack/for-limited-starred-egogifts?${query}`, {
+      credentials: "include",
+    })
+      .then((res) => (res.ok ? res.json() : { items: [] }))
+      .then((data: { items?: unknown[] }) => {
+        if (cancelled) return;
+        const items = Array.isArray(data.items) ? data.items : [];
+        const mapped = items
+          .map((item) => item as { cardpackId?: unknown; title?: unknown; themeType?: unknown; thumbnail?: unknown })
+          .map((item) => ({
+            cardpackId: Number(item.cardpackId),
+            title: String(item.title || ""),
+            themeType: item.themeType == null ? undefined : Number(item.themeType),
+            thumbnail: item.thumbnail == null ? undefined : String(item.thumbnail),
+          }))
+          .filter((item) => !Number.isNaN(item.cardpackId) && item.cardpackId > 0);
+        setLimitedCardPacks(mapped);
+        setSelectedLimitedCardPackIds((prev) => prev.filter((id) => mapped.some((pack) => pack.cardpackId === id)));
+      })
+      .finally(() => {
+        if (!cancelled) setLimitedCardPacksLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [allEgoGiftsFull]);
+
+  // 선택한 한정 카드팩에 포함된 "한정 에고기프트" ID 목록 조회
+  useEffect(() => {
+    if (selectedLimitedCardPackIds.length === 0) {
+      setSelectedLimitedCardPackEgogiftIdMap({});
+      return;
+    }
+    const buildMapFromCache = () => {
+      const fromCache: Record<number, number[]> = {};
+      selectedLimitedCardPackIds.forEach((cardpackId) => {
+        fromCache[cardpackId] = limitedCardPackEgogiftCacheRef.current[cardpackId] || [];
+      });
+      setSelectedLimitedCardPackEgogiftIdMap(fromCache);
+    };
+
+    const missingIds = selectedLimitedCardPackIds.filter(
+      (cardpackId) =>
+        limitedCardPackEgogiftCacheRef.current[cardpackId] == null &&
+        !limitedCardPackEgogiftInFlightRef.current.has(cardpackId)
+    );
+
+    if (missingIds.length === 0) {
+      buildMapFromCache();
+      return;
+    }
+
+    let cancelled = false;
+    missingIds.forEach((id) => limitedCardPackEgogiftInFlightRef.current.add(id));
+    Promise.all(
+      missingIds.map((cardpackId) => fetchLimitedEgogiftIdsForCardpack(cardpackId))
+    ).then((rows) => {
+      if (cancelled) return;
+      rows.forEach((row) => {
+        // 실패한 응답은 캐시에 고정하지 않고 다음 선택 시 재시도 가능하게 둔다.
+        if (row.ok) {
+          limitedCardPackEgogiftCacheRef.current[row.cardpackId] = row.egogiftIds;
+        }
+        limitedCardPackEgogiftInFlightRef.current.delete(row.cardpackId);
+      });
+      buildMapFromCache();
+    });
+
+    return () => {
+      cancelled = true;
+      missingIds.forEach((id) => limitedCardPackEgogiftInFlightRef.current.delete(id));
+    };
+  }, [selectedLimitedCardPackIds]);
+
+  // 한정 카드팩 상세(하위 한정 에고기프트 ID)를 초기 1회 일괄 preload
+  useEffect(() => {
+    if (limitedCardPacks.length === 0) return;
+
+    const allCardPackIds = Array.from(new Set(limitedCardPacks.map((pack) => pack.cardpackId)));
+    const missingIds = allCardPackIds.filter(
+      (cardpackId) =>
+        limitedCardPackEgogiftCacheRef.current[cardpackId] == null &&
+        !limitedCardPackEgogiftInFlightRef.current.has(cardpackId)
+    );
+    if (missingIds.length === 0) return;
+
+    let cancelled = false;
+    missingIds.forEach((id) => limitedCardPackEgogiftInFlightRef.current.add(id));
+    Promise.all(
+      missingIds.map((cardpackId) => fetchLimitedEgogiftIdsForCardpack(cardpackId))
+    )
+      .then((rows) => {
+        if (cancelled) return;
+        rows.forEach((row) => {
+          if (row.ok) {
+            limitedCardPackEgogiftCacheRef.current[row.cardpackId] = row.egogiftIds;
+          }
+          limitedCardPackEgogiftInFlightRef.current.delete(row.cardpackId);
+        });
+
+        // preload 완료 후 현재 선택 상태 맵을 캐시 기준으로 즉시 동기화
+        if (selectedLimitedCardPackIds.length > 0) {
+          const nextMap: Record<number, number[]> = {};
+          selectedLimitedCardPackIds.forEach((cardpackId) => {
+            nextMap[cardpackId] = limitedCardPackEgogiftCacheRef.current[cardpackId] || [];
+          });
+          setSelectedLimitedCardPackEgogiftIdMap(nextMap);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      missingIds.forEach((id) => limitedCardPackEgogiftInFlightRef.current.delete(id));
+    };
+  }, [limitedCardPacks, selectedLimitedCardPackIds]);
 
   // 해시태그 드롭다운 외부 클릭 시 닫기
   useEffect(() => {
@@ -379,6 +669,39 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
     };
   }, [hashtagsOpen]);
 
+  // 한정 카드팩 드롭다운 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!limitedCardPacksOpen) return;
+
+      const target = event.target as Node;
+      const targetElement = event.target as HTMLElement | null;
+      const dropdownRef = limitedCardPackDropdownRef.current;
+      const dropdownContentRef = limitedCardPackDropdownContentRef.current;
+      const clickedInsidePanelRoot = Boolean(
+        targetElement?.closest("[data-limited-cardpack-panel-root]")
+      );
+
+      if (
+        !clickedInsidePanelRoot &&
+        dropdownRef &&
+        dropdownContentRef &&
+        !dropdownRef.contains(target) &&
+        !dropdownContentRef.contains(target)
+      ) {
+        setLimitedCardPacksOpen(false);
+      }
+    };
+
+    if (limitedCardPacksOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [limitedCardPacksOpen]);
+
   // 해시태그 드롭다운 위치 조정
   // embedded일 때: body에 포탈해 위치 state로 배치. 아닐 때: in-place에서 fixed + style로 배치
   useEffect(() => {
@@ -389,6 +712,7 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
     const updateLayout = () => {
       if (!hashtagDropdownRef.current) return;
       const buttonRect = hashtagDropdownRef.current.getBoundingClientRect();
+      const searchRect = searchConditionsRef.current?.getBoundingClientRect();
       const isMobile = window.innerWidth < 768;
       const width = isMobile ? Math.min(400, window.innerWidth - buttonRect.left - 16) : 400;
       let left: number;
@@ -401,11 +725,11 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
         left = buttonRect.right + gap;
         if (left + width > window.innerWidth) left = window.innerWidth - width - 8;
         if (left < 8) left = 8;
-        top = buttonRect.top;
+        // 데스크톱에서는 검색조건 패널의 상단과 해시태그 패널 상단을 맞춘다.
+        top = searchRect ? searchRect.top : buttonRect.top;
       }
       if (embedded) {
         // 검색조건과 같은 높이에서 패널 시작: 검색조건 컨테이너 상단에 맞춤
-        const searchRect = searchConditionsRef.current?.getBoundingClientRect();
         const panelTop = searchRect ? searchRect.top : top;
         setHashtagDropdownPosition({ top: panelTop, left, width });
       } else {
@@ -427,6 +751,58 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
       window.removeEventListener('scroll', updateLayout, true);
     };
   }, [hashtagsOpen, embedded]);
+
+  // 한정 카드팩 드롭다운 위치 조정
+  // 해시태그와 동일하게 우측으로 펼치고, 높이는 검색 조건 영역 높이에 맞춘다.
+  useEffect(() => {
+    if (!limitedCardPacksOpen || !limitedCardPackDropdownRef.current) {
+      if (!limitedCardPacksOpen) setLimitedCardPackDropdownPosition(null);
+      return;
+    }
+    const updateLayout = () => {
+      if (!limitedCardPackDropdownRef.current) return;
+      const buttonRect = limitedCardPackDropdownRef.current.getBoundingClientRect();
+      const searchRect = searchConditionsRef.current?.getBoundingClientRect();
+      const isMobile = window.innerWidth < 768;
+      const width = isMobile ? Math.min(400, window.innerWidth - buttonRect.left - 16) : 400;
+      let left: number;
+      let top: number;
+      let height: number;
+      if (isMobile) {
+        left = buttonRect.left;
+        top = buttonRect.bottom + 4;
+        const viewportBottomPadding = 12;
+        height = Math.max(220, Math.min(520, window.innerHeight - top - viewportBottomPadding));
+      } else {
+        const gap = 8;
+        left = buttonRect.right + gap;
+        if (left + width > window.innerWidth) left = window.innerWidth - width - 8;
+        if (left < 8) left = 8;
+        top = searchRect ? searchRect.top : buttonRect.top;
+        height = searchRect ? Math.max(220, Math.floor(searchRect.height)) : 520;
+      }
+      if (embedded) {
+        setLimitedCardPackDropdownPosition({ top, left, width, height });
+      } else {
+        const dropdownContainer = limitedCardPackDropdownRef.current.querySelector('[data-limited-cardpack-dropdown-container]') as HTMLElement;
+        if (dropdownContainer) {
+          dropdownContainer.style.position = "fixed";
+          dropdownContainer.style.zIndex = "10001";
+          dropdownContainer.style.left = `${left}px`;
+          dropdownContainer.style.top = `${top}px`;
+          dropdownContainer.style.width = `${width}px`;
+          dropdownContainer.style.height = `${height}px`;
+        }
+      }
+    };
+    updateLayout();
+    window.addEventListener("resize", updateLayout);
+    window.addEventListener("scroll", updateLayout, true);
+    return () => {
+      window.removeEventListener("resize", updateLayout);
+      window.removeEventListener("scroll", updateLayout, true);
+    };
+  }, [limitedCardPacksOpen, embedded]);
 
   // 전체 에고기프트 목록 한 번에 불러오기 (초기 로드 시)
   const fetchAllEgoGiftsFull = async () => {
@@ -525,6 +901,15 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
       });
     }
 
+    // 한정 카드팩 필터: 선택한 카드팩에서 "한정으로 출현"하는 에고기프트만 표시
+    if (selectedLimitedCardPackIds.length > 0) {
+      filtered = filtered.filter((egogift) => {
+        const hasLimitedCategory = Array.isArray(egogift.limitedCategoryNames) && egogift.limitedCategoryNames.length > 0;
+        if (!hasLimitedCategory) return false;
+        return selectedLimitedCardPackEgoGiftIdSet.has(egogift.egogiftId);
+      });
+    }
+
     // 정렬: 키워드별 순서 → 등급(높은 등급 우선) → 출현난이도(노말→하드→익스트림)
     const KEYWORD_ORDER = [
       "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격", "범용", "기타",
@@ -572,6 +957,8 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
     selectedGrades,
     selectedHashtagIds,
     tagOperator,
+    selectedLimitedCardPackIds,
+    selectedLimitedCardPackEgoGiftIdSet,
   ]);
 
   // 필터링된 결과를 상태에 반영
@@ -579,14 +966,48 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
     setEgoGifts(filteredEgoGifts);
   }, [filteredEgoGifts]);
 
-  // 합성전용 에고기프트의 합성재료 목록 배치 조회
+  // 합성전용 에고기프트의 합성재료 목록 배치 조회 (던전보고서에서만 사용)
   const [synthesisMaterialsMap, setSynthesisMaterialsMap] = useState<Record<number, string[]>>({});
+  const synthesisPrefetchDoneRef = useRef(false);
   useEffect(() => {
-    const synthesisIds = filteredEgoGifts.filter((eg) => eg.synthesisYn === "Y").map((eg) => eg.egogiftId);
-    if (synthesisIds.length === 0) {
-      setSynthesisMaterialsMap({});
+    if (!enableSynthesisMaterialsPrefetch) {
       return;
     }
+    if (synthesisPrefetchDoneRef.current) return;
+    if (allEgoGiftsFull.length === 0) return;
+
+    const synthesisIds = allEgoGiftsFull
+      .filter((eg) => eg.synthesisYn === "Y")
+      .map((eg) => eg.egogiftId);
+    if (synthesisIds.length === 0) {
+      synthesisPrefetchDoneRef.current = true;
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem(SYNTHESIS_MATERIALS_CACHE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { fetchedAt?: number; data?: Record<string, string[]> };
+          const fetchedAt = Number(parsed?.fetchedAt || 0);
+          const isFresh = Date.now() - fetchedAt < SYNTHESIS_MATERIALS_CACHE_TTL_MS;
+          if (isFresh && parsed?.data && typeof parsed.data === "object") {
+            const normalized: Record<number, string[]> = {};
+            Object.entries(parsed.data).forEach(([k, v]) => {
+              const id = Number(k);
+              if (!Number.isNaN(id) && Array.isArray(v)) normalized[id] = v;
+            });
+            setSynthesisMaterialsMap(normalized);
+            synthesisPrefetchDoneRef.current = true;
+            return;
+          }
+        }
+      } catch {
+        // 캐시 읽기 실패 시 네트워크 조회로 진행
+      }
+    }
+
+    // 던전보고서에서 필요한 합성 하위 에고기프트 조합식을 1회 일괄 조회
     const q = synthesisIds.map((id) => "egogiftIds=" + id).join("&");
     fetch(`${API_BASE_URL}/user/egogift/synthesis-materials?${q}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : {}))
@@ -597,15 +1018,22 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
           if (Array.isArray(data[k])) next[id] = data[k];
         });
         setSynthesisMaterialsMap(next);
-      })
-      .catch(() => setSynthesisMaterialsMap({}));
-  }, [filteredEgoGifts]);
+        synthesisPrefetchDoneRef.current = true;
 
-  // 초기 로드 시 전체 목록 불러오기
-  useEffect(() => {
-    fetchAllEgoGiftsFull();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+        if (typeof window !== "undefined") {
+          try {
+            const cachePayload = {
+              fetchedAt: Date.now(),
+              data: Object.fromEntries(Object.entries(next).map(([k, v]) => [String(k), v])),
+            };
+            window.localStorage.setItem(SYNTHESIS_MATERIALS_CACHE_KEY, JSON.stringify(cachePayload));
+          } catch {
+            // 캐시 저장 실패는 무시
+          }
+        }
+      })
+      .catch(() => {});
+  }, [enableSynthesisMaterialsPrefetch, allEgoGiftsFull]);
 
   const fetchAllHashtags = async () => {
     try {
@@ -1183,6 +1611,8 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
                       setIncludeUniversalKeyword(false);
                       setSelectedAttrKeywordIds([]);
                       setSelectedHashtagIds([]);
+                      setSelectedLimitedCardPackIds([]);
+                      setLimitedCardPackSearchText("");
                       setSelectedGiftTiers([]);
                       setSelectedGrades([]);
                       setTagOperator("OR");
@@ -1561,6 +1991,61 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
                       </div>
                     )}
                   </div>
+
+                  <div className="relative" ref={limitedCardPackDropdownRef}>
+                    <button
+                      onClick={() => setLimitedCardPacksOpen((prev) => !prev)}
+                      className="w-full px-3 py-2 bg-[#2a2a2d] text-gray-300 rounded hover:bg-[#3a3a3d] text-sm flex items-center justify-between relative z-10"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>한정 카드팩</span>
+                        {selectedLimitedCardPackIds.length > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-yellow-400 text-black text-xs font-semibold">
+                            {selectedLimitedCardPackIds.length}
+                          </span>
+                        )}
+                      </span>
+                      <span className={`transition-transform duration-200 ${limitedCardPacksOpen ? "rotate-90" : ""}`}>▶</span>
+                    </button>
+
+                    {!(embedded && limitedCardPacksOpen) && (
+                      <div
+                        data-limited-cardpack-dropdown-container
+                        className={`absolute transition-all duration-300 ease-in-out ${
+                          limitedCardPacksOpen
+                            ? "opacity-100 visible md:mt-0 md:ml-2 md:left-full"
+                            : "opacity-0 invisible max-h-0 pointer-events-none"
+                        } left-0 w-full`}
+                        style={{ zIndex: 10001 }}
+                      >
+                        <div
+                          data-limited-cardpack-panel-root
+                          ref={limitedCardPackDropdownContentRef}
+                          className="p-0 bg-[#2a2a2d] border border-[#b8860b]/40 rounded shadow-lg h-full flex flex-col"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="sticky top-0 z-20 w-full bg-[#2a2a2d] rounded-t border-b border-[#b8860b]/30 p-3">
+                            <input
+                              type="text"
+                              placeholder="한정 카드팩 검색..."
+                              value={limitedCardPackSearchText}
+                              onChange={(e) => setLimitedCardPackSearchText(e.target.value)}
+                              className="w-full px-3 py-2 bg-[#1a1a1d] text-white rounded text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                          <LimitedCardPackDropdownPanel
+                            className="flex-1 min-h-0"
+                            groupedLimitedCardPacksByTheme={groupedLimitedCardPacksByTheme}
+                            selectedLimitedCardPackIds={selectedLimitedCardPackIds}
+                            setSelectedLimitedCardPackIds={setSelectedLimitedCardPackIds}
+                            limitedCardPacksLoading={limitedCardPacksLoading}
+                            filteredLimitedCardPackCount={filteredLimitedCardPacks.length}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 </div>
                   </div>
@@ -1768,6 +2253,45 @@ export function EgoGiftPageContent({ slotAboveSearch, embedded, starredEgoGiftId
             setEgoGiftFilters={setEgoGiftFilters}
             getCategoryDisplayName={getCategoryDisplayName}
           />
+        </div>,
+        document.body
+      )}
+
+      {/* embedded일 때 한정 카드팩 드롭다운을 body에 포탈 */}
+      {embedded && limitedCardPacksOpen && limitedCardPackDropdownPosition && typeof window !== "undefined" && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            top: limitedCardPackDropdownPosition.top,
+            left: limitedCardPackDropdownPosition.left,
+            width: limitedCardPackDropdownPosition.width,
+            height: limitedCardPackDropdownPosition.height,
+            zIndex: 10001,
+          }}
+        >
+          <div
+            data-limited-cardpack-panel-root
+            ref={limitedCardPackDropdownContentRef}
+            className="p-0 bg-[#2a2a2d] border border-[#b8860b]/40 rounded shadow-lg h-full flex flex-col"
+          >
+            <div className="sticky top-0 z-20 w-full bg-[#2a2a2d] rounded-t border-b border-[#b8860b]/30 p-3">
+              <input
+                type="text"
+                placeholder="한정 카드팩 검색..."
+                value={limitedCardPackSearchText}
+                onChange={(e) => setLimitedCardPackSearchText(e.target.value)}
+                className="w-full px-3 py-2 bg-[#1a1a1d] text-white rounded text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+              />
+            </div>
+            <LimitedCardPackDropdownPanel
+              className="flex-1 min-h-0"
+              groupedLimitedCardPacksByTheme={groupedLimitedCardPacksByTheme}
+              selectedLimitedCardPackIds={selectedLimitedCardPackIds}
+              setSelectedLimitedCardPackIds={setSelectedLimitedCardPackIds}
+              limitedCardPacksLoading={limitedCardPacksLoading}
+              filteredLimitedCardPackCount={filteredLimitedCardPacks.length}
+            />
+          </div>
         </div>,
         document.body
       )}

@@ -70,8 +70,16 @@ export default function PrivacyPolicyContent({
                 <div>
                   <h3 className="text-xl font-semibold text-yellow-200 mb-2">2.1. 개인정보</h3>
                   <p>
-                    본 사이트는 회원가입, 댓글, 게시판, 입력 폼 등의 기능을 제공하지 않으며,
-                    이름, 이메일 주소 등 개인을 직접 식별할 수 있는 정보를 의도적으로 수집하거나 저장하지 않습니다.
+                    본 사이트는 Google OAuth 로그인을 제공하며, 로그인 기능 제공을 위해 OAuth 제공자의
+                    고유 사용자 식별자(providerUserId)를 처리할 수 있습니다.
+                  </p>
+                  <p>
+                    상기 식별자는 이름·이메일처럼 직접 식별정보가 아니더라도 개인을 구분할 수 있는 정보이므로
+                    개인정보 관련 법령에 따라 보호 대상으로 취급합니다.
+                  </p>
+                  <p>
+                    본 사이트는 회원가입 단계에서 추가 개인정보를 요구하지 않으며,
+                    로그인/닉네임/게시판 기능 운영에 필요한 최소 범위 내에서만 정보를 처리합니다.
                   </p>
                 </div>
                 <div>
@@ -104,6 +112,9 @@ export default function PrivacyPolicyContent({
                   <li>IP 주소는 익명화 처리되어 개인을 직접 식별할 수 없습니다.</li>
                   <li>수집된 정보는 통계 분석 목적으로만 사용됩니다.</li>
                 </ul>
+                <p>
+                  Google OAuth 로그인 과정에서 처리되는 정보와 관련된 자세한 안내는 아래 Google 정책을 참고하시기 바랍니다.
+                </p>
                 <p>
                   Google의 개인정보 처리 방식에 대한 자세한 내용은 아래 링크를 참고하시기 바랍니다.
                 </p>
@@ -177,7 +188,7 @@ export default function PrivacyPolicyContent({
                   본 사이트는 다음과 같은 외부 서비스 제공자와 제한된 정보를 공유할 수 있습니다.
                 </p>
                 <ul className="list-disc list-inside space-y-1 ml-4">
-                  <li>Google LLC (Google Analytics, Google AdSense)</li>
+                  <li>Google LLC (Google OAuth, Google Analytics, Google AdSense)</li>
                 </ul>
                 <p>
                   이 과정에서 정보는 대한민국 외 지역(미국 등)으로 이전될 수 있으며,
@@ -262,8 +273,16 @@ export default function PrivacyPolicyContent({
                 <div>
                   <h3 className="text-xl font-semibold text-yellow-200 mb-2">2.1. Personal Information</h3>
                   <p>
-                    The Site does not provide user registration, comment systems, message boards, or input forms.
-                    Accordingly, the Site does not intentionally collect or store personally identifiable information such as names or email addresses.
+                    The Site provides Google OAuth login and may process the OAuth provider's unique user identifier
+                    (providerUserId) to authenticate and maintain user sessions.
+                  </p>
+                  <p>
+                    Although this identifier may not directly reveal a name or email address, it can still be used
+                    to distinguish an individual account and is therefore treated as personal data under applicable laws.
+                  </p>
+                  <p>
+                    The Site does not require additional signup data and processes only the minimum information
+                    necessary for login, nickname, and board features.
                   </p>
                 </div>
                 <div>
@@ -297,12 +316,12 @@ export default function PrivacyPolicyContent({
                   <li>Collected data is used solely for statistical purposes.</li>
                 </ul>
                 <p>
-                  For more information on how Google processes data, please visit:
+                  For details on information processed during Google OAuth login, please refer to:
                 </p>
                 <p>
-                  <a 
-                    href="https://policies.google.com/privacy" 
-                    target="_blank" 
+                  <a
+                    href="https://policies.google.com/privacy"
+                    target="_blank"
                     rel="noopener noreferrer"
                     className="text-yellow-300 hover:text-yellow-400 underline break-all"
                   >
@@ -369,7 +388,7 @@ export default function PrivacyPolicyContent({
                   The Site may share limited information with third-party service providers, including:
                 </p>
                 <ul className="list-disc list-inside space-y-1 ml-4">
-                  <li>Google LLC (Google Analytics, Google AdSense)</li>
+                  <li>Google LLC (Google OAuth, Google Analytics, Google AdSense)</li>
                 </ul>
                 <p>
                   Information processed by these services may be transferred to and stored in countries outside the user's residence, including the United States.

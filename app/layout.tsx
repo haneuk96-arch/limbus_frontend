@@ -18,24 +18,38 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://limbus.haneuk.info"),
   title: {
-    default: "단테의 달의기억",
+    default: "단테의 달의기억 | 림버스 에고기프트/던전 정보",
     template: "%s | 단테의 달의기억",
   },
-  description: "Limbus Company 정보 사이트 - 에고기프트, 던전 이벤트, 키워드 정보 제공",
-  keywords: ["Limbus Company", "림버스 컴퍼니", "에고기프트", "던전 이벤트", "키워드"],
+  description:
+    "림버스 컴퍼니 에고기프트, 던전 이벤트, 키워드, 조합식 정보를 빠르게 확인할 수 있는 팬사이트입니다. 단딸기 키워드 및 공유 보고서 기능을 제공합니다.",
+  keywords: [
+    "Limbus Company",
+    "림버스 컴퍼니",
+    "림버스 에고기프트",
+    "에고기프트",
+    "단딸기",
+    "던전 이벤트",
+    "카드팩",
+    "키워드",
+    "조합식",
+  ],
   authors: [{ name: "단테의 달의기억" }],
   openGraph: {
     type: "website",
     locale: "ko_KR",
     siteName: "단테의 달의기억",
-    title: "단테의 달의기억",
-    description: "Limbus Company 정보 사이트 - 에고기프트, 던전 이벤트, 키워드 정보 제공",
+    title: "단테의 달의기억 | 림버스 에고기프트/던전 정보",
+    description:
+      "림버스 컴퍼니 에고기프트, 던전 이벤트, 키워드, 조합식 정보를 빠르게 확인할 수 있는 팬사이트입니다.",
+    url: "https://limbus.haneuk.info",
   },
   twitter: {
     card: "summary_large_image",
-    title: "단테의 달의기억",
-    description: "Limbus Company 정보 사이트",
+    title: "단테의 달의기억 | 림버스 에고기프트/던전 정보",
+    description: "림버스 컴퍼니 에고기프트/던전 이벤트/키워드 정보",
   },
   icons: {
     icon: "/LunarMemory.ico",

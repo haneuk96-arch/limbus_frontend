@@ -1,17 +1,16 @@
-import { MetadataRoute } from 'next'
+import type { MetadataRoute } from "next";
 
 export default function robots(): MetadataRoute.Robots {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://limbus.haneuk.info'
-  
   return {
     rules: [
       {
-        userAgent: '*',
-        allow: '/',
-        disallow: ['/dante/', '/api/'],
+        userAgent: "*",
+        allow: ["/", "/egogift", "/event", "/cardpack"],
+        disallow: ["/login", "/favorites", "/api/"],
       },
     ],
-    sitemap: `${baseUrl}/sitemap.xml`,
-  }
+    sitemap: "https://limbus.haneuk.info/sitemap.xml",
+    host: "https://limbus.haneuk.info",
+  };
 }
 

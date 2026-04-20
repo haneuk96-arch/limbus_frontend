@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import Header from "./Header";
 
@@ -12,6 +13,10 @@ export default function ConditionalHeader() {
     return null;
   }
   
-  return <Header />;
+  return (
+    <Suspense fallback={null}>
+      <Header />
+    </Suspense>
+  );
 }
 

@@ -356,6 +356,8 @@ type Props = {
   omitSynthesis?: boolean;
   /** true면 부모 flex 열 높이에 맞춰 그리드 영역을 늘림(층별 보기 한 줄) */
   fillParentHeight?: boolean;
+  /** true면 획득/삭제/hover 동작 제거하고 카드 클릭은 정보보기만 수행 */
+  readOnly?: boolean;
 };
 
 export function ResultKeywordSection({
@@ -379,6 +381,7 @@ export function ResultKeywordSection({
   variant = "keyword",
   omitSynthesis = false,
   fillParentHeight = false,
+  readOnly = false,
 }: Props) {
   const isGiftGridExpanded =
     variant === "flat" ? true : keywordGiftExpandedByKeyword[keyword] !== false;
@@ -461,25 +464,33 @@ export function ResultKeywordSection({
                 return (
                   <div
                     key={eg.egogiftId}
-                    role="checkbox"
-                    aria-checked={checked}
+                    role={readOnly ? "button" : "checkbox"}
+                    aria-checked={readOnly ? undefined : checked}
                     tabIndex={0}
                     onClick={(e) => {
-                      onToggleEgoGiftCheck(eg.egogiftId);
-                      /* 마우스 클릭만: 카드가 포커스를 받으면 group-focus-within 등으로 호버 UI가 고정되는 브라우저 동작 방지 */
-                      if (e.detail > 0) {
-                        (e.currentTarget as HTMLElement).blur();
+                      if (readOnly) {
+                        egoGiftPreviewOpenRef.current?.(eg.giftName);
+                      } else {
+                        onToggleEgoGiftCheck(eg.egogiftId);
+                        /* 마우스 클릭만: 카드가 포커스를 받으면 group-focus-within 등으로 호버 UI가 고정되는 브라우저 동작 방지 */
+                        if (e.detail > 0) {
+                          (e.currentTarget as HTMLElement).blur();
+                        }
                       }
                     }}
                     onKeyDown={(e) => {
                       if (e.key === " " || e.key === "Enter") {
                         e.preventDefault();
-                        onToggleEgoGiftCheck(eg.egogiftId);
+                        if (readOnly) {
+                          egoGiftPreviewOpenRef.current?.(eg.giftName);
+                        } else {
+                          onToggleEgoGiftCheck(eg.egogiftId);
+                        }
                       }
                     }}
-                    className={`group relative rounded-lg p-3 min-w-0 flex flex-col gap-1 text-left transition-[box-shadow,filter] shadow-sm cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/60 ${checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
+                    className={`group relative rounded-lg p-3 min-w-0 flex flex-col gap-1 text-left transition-[box-shadow,filter] shadow-sm cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/60 ${!readOnly && checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
                   >
-                    {checked && (
+                    {!readOnly && checked && (
                       <div
                         className="result-egogift-checked-overlay pointer-events-none absolute inset-0 z-[1] rounded-lg bg-black/50"
                         aria-hidden
@@ -501,32 +512,36 @@ export function ResultKeywordSection({
                       {eg.synthesisYn === "Y" && <div className="text-purple-300 text-xs">합성전용</div>}
                     </div>
                     {/* 우측 정보 보기 제외 본문: 호버 시 획득 / 획득 해제 */}
-                    <div
-                      className="result-egogift-acquire-zone pointer-events-auto absolute left-0 top-0 right-[20%] bottom-0 z-[22] flex items-center justify-center rounded-md bg-black/0 transition-colors duration-200 group/acquire hover:bg-black/50"
-                      aria-hidden
-                    >
-                      <span className="pointer-events-none relative z-[1] px-1 text-center text-xs font-bold leading-tight text-white opacity-0 transition-opacity duration-200 group-hover/acquire:opacity-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:text-sm">
-                        {checked ? "획득 해제" : "획득"}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      data-result-egogift-info
-                      title="에고기프트 상세 보기"
-                      aria-label={`${eg.giftName} 정보 보기`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerZoneClickFlash(eg.egogiftId, "info");
-                        egoGiftPreviewOpenRef.current?.(eg.giftName);
-                      }}
-                      className={`absolute top-0 right-0 bottom-0 z-[24] flex w-[20%] min-w-[2rem] items-center justify-center border-l border-amber-800/25 bg-yellow-400/72 text-[10px] font-semibold leading-tight text-black/90 opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-[2px] transition-opacity pointer-events-none [writing-mode:vertical-rl] group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
-                        infoFlashing
-                          ? "z-[28] !opacity-100 bg-yellow-300/88 text-black outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_22px_rgba(251,191,36,0.5)] scale-[1.03]"
-                          : ""
-                      }`}
-                    >
-                      정보 보기
-                    </button>
+                    {!readOnly && (
+                      <>
+                        <div
+                          className="result-egogift-acquire-zone pointer-events-auto absolute left-0 top-0 right-[20%] bottom-0 z-[22] flex items-center justify-center rounded-md bg-black/0 transition-colors duration-200 group/acquire hover:bg-black/50"
+                          aria-hidden
+                        >
+                          <span className="pointer-events-none relative z-[1] px-1 text-center text-xs font-bold leading-tight text-white opacity-0 transition-opacity duration-200 group-hover/acquire:opacity-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:text-sm">
+                            {checked ? "획득 해제" : "획득"}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          data-result-egogift-info
+                          title="에고기프트 상세 보기"
+                          aria-label={`${eg.giftName} 정보 보기`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            triggerZoneClickFlash(eg.egogiftId, "info");
+                            egoGiftPreviewOpenRef.current?.(eg.giftName);
+                          }}
+                          className={`absolute top-0 right-0 bottom-0 z-[24] flex w-[20%] min-w-[2rem] items-center justify-center border-l border-amber-800/25 bg-yellow-400/72 text-[10px] font-semibold leading-tight text-black/90 opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-[2px] transition-opacity pointer-events-none [writing-mode:vertical-rl] group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
+                            infoFlashing
+                              ? "z-[28] !opacity-100 bg-yellow-300/88 text-black outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_22px_rgba(251,191,36,0.5)] scale-[1.03]"
+                              : ""
+                          }`}
+                        >
+                          정보 보기
+                        </button>
+                      </>
+                    )}
                   </div>
                 );
               }
@@ -541,56 +556,68 @@ export function ResultKeywordSection({
               return (
                 <div
                   key={eg.egogiftId}
-                  role="checkbox"
-                  aria-checked={checked}
+                  role={readOnly ? "button" : "checkbox"}
+                  aria-checked={readOnly ? undefined : checked}
                   tabIndex={0}
                   onClick={(e) => {
-                    onToggleEgoGiftCheck(eg.egogiftId);
-                    if (e.detail > 0) {
-                      (e.currentTarget as HTMLElement).blur();
+                    if (readOnly) {
+                      egoGiftPreviewOpenRef.current?.(eg.giftName);
+                    } else {
+                      onToggleEgoGiftCheck(eg.egogiftId);
+                      if (e.detail > 0) {
+                        (e.currentTarget as HTMLElement).blur();
+                      }
                     }
                   }}
                   onKeyDown={(e) => {
                     if (e.key === " " || e.key === "Enter") {
                       e.preventDefault();
-                      onToggleEgoGiftCheck(eg.egogiftId);
+                      if (readOnly) {
+                        egoGiftPreviewOpenRef.current?.(eg.giftName);
+                      } else {
+                        onToggleEgoGiftCheck(eg.egogiftId);
+                      }
                     }
                   }}
-                  className={`group relative rounded p-3 min-w-0 flex flex-col cursor-pointer transition-all outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] ${checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
+                  className={`group relative rounded p-3 min-w-0 flex flex-col cursor-pointer transition-all outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] ${!readOnly && checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
                 >
-                  {checked && (
+                  {!readOnly && checked && (
                     <div
                       className="result-egogift-checked-overlay pointer-events-none absolute inset-0 z-[8] rounded-[inherit] bg-black/50"
                       aria-hidden
                     />
                   )}
-                  <button
-                    type="button"
-                    data-result-egogift-info
-                    title="에고기프트 상세 보기"
-                    aria-label={`${eg.giftName} 정보 보기`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      triggerZoneClickFlash(eg.egogiftId, "info");
-                      egoGiftPreviewOpenRef.current?.(eg.giftName);
-                    }}
-                    className={`absolute top-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-b border-amber-800/28 bg-yellow-400/72 text-xs font-semibold text-black/90 opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-[2px] transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
-                      infoFlashing
-                        ? "z-[32] !opacity-100 bg-yellow-300/88 text-black outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_24px_rgba(251,191,36,0.5)] scale-[1.02]"
-                        : ""
-                    }`}
-                  >
-                    정보 보기
-                  </button>
-                  {/* 상단 정보 보기 ↔ 하단 삭제 사이 */}
-                  <div
-                    className="result-egogift-acquire-zone pointer-events-auto absolute left-0 right-0 top-[20%] bottom-[20%] z-[22] flex items-center justify-center rounded-sm bg-black/0 transition-colors duration-200 group/acquire hover:bg-black/50"
-                    aria-hidden
-                  >
-                    <span className="pointer-events-none relative z-[1] px-2 text-center text-sm font-bold text-white opacity-0 transition-opacity duration-200 group-hover/acquire:opacity-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
-                      {checked ? "획득 해제" : "획득"}
-                    </span>
-                  </div>
+                  {!readOnly && (
+                    <>
+                      <button
+                        type="button"
+                        data-result-egogift-info
+                        title="에고기프트 상세 보기"
+                        aria-label={`${eg.giftName} 정보 보기`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          triggerZoneClickFlash(eg.egogiftId, "info");
+                          egoGiftPreviewOpenRef.current?.(eg.giftName);
+                        }}
+                        className={`absolute top-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-b border-amber-800/28 bg-yellow-400/72 text-xs font-semibold text-black/90 opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-[2px] transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
+                          infoFlashing
+                            ? "z-[32] !opacity-100 bg-yellow-300/88 text-black outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_24px_rgba(251,191,36,0.5)] scale-[1.02]"
+                            : ""
+                        }`}
+                      >
+                        정보 보기
+                      </button>
+                      {/* 상단 정보 보기 ↔ 하단 삭제 사이 */}
+                      <div
+                        className="result-egogift-acquire-zone pointer-events-auto absolute left-0 right-0 top-[20%] bottom-[20%] z-[22] flex items-center justify-center rounded-sm bg-black/0 transition-colors duration-200 group/acquire hover:bg-black/50"
+                        aria-hidden
+                      >
+                        <span className="pointer-events-none relative z-[1] px-2 text-center text-sm font-bold text-white opacity-0 transition-opacity duration-200 group-hover/acquire:opacity-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
+                          {checked ? "획득 해제" : "획득"}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   <div className="relative aspect-square mb-2 flex-shrink-0">
                     <img
                       src="/images/egogift/egogift_frame.webp"
@@ -632,24 +659,26 @@ export function ResultKeywordSection({
                       </div>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    data-result-egogift-delete
-                    title="보고서 즐겨찾기에서 제거"
-                    aria-label={`${eg.giftName} 보고서에서 삭제`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      triggerZoneClickFlash(eg.egogiftId, "delete");
-                      onRemoveStarredEgoGift(eg.egogiftId);
-                    }}
-                    className={`absolute bottom-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-t border-red-400/40 bg-red-950/80 text-xs font-semibold text-red-200/95 opacity-0 shadow-[inset_0_0_14px_rgba(0,0,0,0.4)] transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/90 focus-visible:ring-inset exclude-from-capture ${zoneFlashBaseTransition} ${
-                      deleteFlashing
-                        ? "z-[32] !opacity-100 outline outline-2 outline-red-300 outline-offset-0 bg-red-600/45 shadow-[0_0_0_3px_rgba(248,113,113,0.55),0_0_26px_rgba(239,68,68,0.55)] scale-[1.02]"
-                        : ""
-                    }`}
-                  >
-                    삭제
-                  </button>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      data-result-egogift-delete
+                      title="보고서 즐겨찾기에서 제거"
+                      aria-label={`${eg.giftName} 보고서에서 삭제`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        triggerZoneClickFlash(eg.egogiftId, "delete");
+                        onRemoveStarredEgoGift(eg.egogiftId);
+                      }}
+                      className={`absolute bottom-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-t border-red-400/40 bg-red-950/80 text-xs font-semibold text-red-200/95 opacity-0 shadow-[inset_0_0_14px_rgba(0,0,0,0.4)] transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/90 focus-visible:ring-inset exclude-from-capture ${zoneFlashBaseTransition} ${
+                        deleteFlashing
+                          ? "z-[32] !opacity-100 outline outline-2 outline-red-300 outline-offset-0 bg-red-600/45 shadow-[0_0_0_3px_rgba(248,113,113,0.55),0_0_26px_rgba(239,68,68,0.55)] scale-[1.02]"
+                          : ""
+                      }`}
+                    >
+                      삭제
+                    </button>
+                  )}
                 </div>
               );
             })}

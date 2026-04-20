@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
+import { Suspense, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { API_BASE_URL } from "@/lib/api";
 const RESULT_EGOGIFT_BASE_URL = API_BASE_URL.replace("/api", "");
 import { getOrCreateUUID } from "@/lib/uuid";
@@ -12,6 +13,7 @@ import {
   SynthesisRecipesSubsetBlock,
   filterSynthesisRecipesForEgoIds,
   type ResultEgoGiftItem,
+  type SynthesisRecipeItem,
 } from "./ResultKeywordSection";
 import {
   ObservedEgoGiftsSection,
@@ -83,11 +85,44 @@ interface FavoriteItem {
   schemaVersion?: number;
 }
 
-type FavoritesTab = "egogift" | "result";
+interface ShareBoardPostItem {
+  postId: number;
+  favoriteId: number;
+  title: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  viewCount: number;
+  recommendCount?: number;
+  periodRecommendCount?: number;
+  recommendedByMe?: boolean;
+  commentCount?: number;
+  authorNickname?: string;
+  pageType?: string;
+  searchJson?: string;
+  schemaVersion?: number;
+  isMine?: boolean;
+}
+
+interface ShareBoardCommentItem {
+  commentId: number;
+  postId: number;
+  parentCommentId?: number | null;
+  depth: number;
+  authorNickname?: string;
+  content: string;
+  deletedYn?: string;
+  createdAt: string;
+  updatedAt: string;
+  isMine?: boolean;
+}
+
+type FavoritesTab = "egogift" | "result" | "share-board";
 
 const TAB_LIST: { key: FavoritesTab; label: string }[] = [
   { key: "result", label: "파우스트의 보고서" },
   { key: "egogift", label: "에고기프트" },
+  { key: "share-board", label: "공유게시판" },
 ];
 
 /** 결과 탭 모아보기: 단일 ResultKeywordSection(ref·접기 state 키) */
@@ -157,6 +192,33 @@ const MODAL_DIFFICULTY_ALLOWED: Record<string, string[]> = {
   하드: ["하드"],
   익스트림: ["하드", "익스트림"],
 };
+
+const RESULT_KEYWORD_ORDER = [
+  "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격", "범용", "기타",
+];
+
+function previewTierSortOrder(tier: string | undefined): number {
+  if (tier == null || tier === "") return 99;
+  const t = String(tier).trim().toUpperCase();
+  if (t === "1") return 1;
+  if (t === "2") return 2;
+  if (t === "3") return 3;
+  if (t === "4") return 4;
+  if (t === "5") return 5;
+  if (t === "EX") return 6;
+  return 99;
+}
+
+function previewGradeSortOrder(grades: string[] | undefined): number {
+  if (!grades || grades.length === 0) return 99;
+  let min = 99;
+  for (const g of grades) {
+    if (g === "N") min = Math.min(min, 1);
+    else if (g === "H") min = Math.min(min, 2);
+    else if (g === "E") min = Math.min(min, 3);
+  }
+  return min;
+}
 
 /** v2 모달 → for-limited-starred-egogifts API (탭별 난이도 파라미터) */
 const V2_MODAL_TAB_API_DIFFICULTIES: Record<V2PlannedDifficultyKey, readonly string[]> = {
@@ -320,7 +382,10 @@ type MissedLimitedFetchSnapshot = {
   filterKey: string;
 };
 
-export default function FavoritesPage() {
+function FavoritesPageClient() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<FavoritesTab>("result");
   const [titleInput, setTitleInput] = useState("");
   const [items, setItems] = useState<FavoriteItem[]>([]);
@@ -331,6 +396,8 @@ export default function FavoritesPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingFavoriteId, setEditingFavoriteId] = useState<number | null>(null);
   const [editingTitleInput, setEditingTitleInput] = useState<string>("");
+  const [favoriteActionsMenuId, setFavoriteActionsMenuId] = useState<number | null>(null);
+  const [favoriteActionsMenuPosition, setFavoriteActionsMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [favoritesPanelOpen, setFavoritesPanelOpen] = useState(true);
   const [sharingId, setSharingId] = useState<number | null>(null);
   const [shareToastMessage, setShareToastMessage] = useState<string | null>(null);
@@ -342,6 +409,46 @@ export default function FavoritesPage() {
   const [importLookupResult, setImportLookupResult] = useState<{ searchJson: string; pageType: string } | null>(null);
   /** 2단계에서 저장할 보고서 명 */
   const [importSaveTitleInput, setImportSaveTitleInput] = useState("");
+  const [shareBoardFavoriteId, setShareBoardFavoriteId] = useState<number | "">("");
+  const [shareBoardTitleInput, setShareBoardTitleInput] = useState("");
+  const [shareBoardDescriptionInput, setShareBoardDescriptionInput] = useState("");
+  const [shareBoardRegistering, setShareBoardRegistering] = useState(false);
+  const [shareBoardLoading, setShareBoardLoading] = useState(false);
+  const [shareBoardPosts, setShareBoardPosts] = useState<ShareBoardPostItem[]>([]);
+  const [shareBoardSelectedPost, setShareBoardSelectedPost] = useState<ShareBoardPostItem | null>(null);
+  const [shareBoardSearchText, setShareBoardSearchText] = useState("");
+  const [shareBoardSearchType, setShareBoardSearchType] = useState<"title" | "author">("title");
+  const [shareBoardSort, setShareBoardSort] = useState<"latest" | "recommend7" | "recommend15" | "recommend30">("latest");
+  const [shareBoardPopularOnly, setShareBoardPopularOnly] = useState(false);
+  const [shareBoardPage, setShareBoardPage] = useState(1);
+  const [shareBoardTotalPages, setShareBoardTotalPages] = useState(1);
+  const [shareBoardTotalCount, setShareBoardTotalCount] = useState(0);
+  const [shareBoardEditing, setShareBoardEditing] = useState(false);
+  const [shareBoardEditTitle, setShareBoardEditTitle] = useState("");
+  const [shareBoardEditDescription, setShareBoardEditDescription] = useState("");
+  const [shareBoardUpdating, setShareBoardUpdating] = useState(false);
+  const [shareBoardDeleting, setShareBoardDeleting] = useState(false);
+  const [shareBoardPreviewLoading, setShareBoardPreviewLoading] = useState(false);
+  const [shareBoardPreviewCardPacks, setShareBoardPreviewCardPacks] = useState<Array<{ cardpackId: number; title: string; thumbnail?: string; floors?: number[]; difficulties?: string[] }>>([]);
+  const [shareBoardPreviewEgoGifts, setShareBoardPreviewEgoGifts] = useState<Array<{ egogiftId: number; giftName: string; thumbnail?: string; giftTier?: string; keywordName?: string; grades?: string[]; synthesisYn?: string; limitedCategoryNames?: string[] }>>([]);
+  const [shareBoardPreviewSynthesisRecipes, setShareBoardPreviewSynthesisRecipes] = useState<SynthesisRecipeItem[]>([]);
+  const [shareBoardPreviewKeywordGiftExpandedByKeyword, setShareBoardPreviewKeywordGiftExpandedByKeyword] = useState<Record<string, boolean>>({});
+  const [shareBoardPreviewSynthesisExpandedByKeyword, setShareBoardPreviewSynthesisExpandedByKeyword] = useState<Record<string, boolean>>({});
+  const [shareBoardPreviewSchemaVersion, setShareBoardPreviewSchemaVersion] = useState<number>(1);
+  const [shareBoardPreviewCheckedCardPackByFloor, setShareBoardPreviewCheckedCardPackByFloor] = useState<Record<number, number>>({});
+  const [shareBoardPreviewPlannedCardPackDifficultyByFloor, setShareBoardPreviewPlannedCardPackDifficultyByFloor] = useState<Record<number, V2PlannedDifficultyKey>>({});
+  const [shareBoardPreviewObservedEgoGiftIds, setShareBoardPreviewObservedEgoGiftIds] = useState<number[]>([]);
+  const [shareBoardPreviewEgoGiftViewMode, setShareBoardPreviewEgoGiftViewMode] = useState<ResultEgoGiftViewMode>("keyword");
+  const [shareBoardComments, setShareBoardComments] = useState<ShareBoardCommentItem[]>([]);
+  const [shareBoardCommentsLoading, setShareBoardCommentsLoading] = useState(false);
+  const [shareBoardCommentInput, setShareBoardCommentInput] = useState("");
+  const [shareBoardReplyParentId, setShareBoardReplyParentId] = useState<number | null>(null);
+  const [shareBoardReplyInput, setShareBoardReplyInput] = useState("");
+  const [shareBoardCommentSubmitting, setShareBoardCommentSubmitting] = useState(false);
+
+  const shareBoardMode = (searchParams.get("shareBoardMode") ?? "list") as "list" | "new" | "detail";
+  const shareBoardPostIdParam = Number(searchParams.get("postId") || 0);
+  const shareBoardFavoriteIdParam = Number(searchParams.get("favoriteId") || 0);
   /** 삭제 확인 모달: 삭제 대상 favoriteId (null이면 모달 숨김) */
   const [deleteConfirmFavoriteId, setDeleteConfirmFavoriteId] = useState<number | null>(null);
   /** 에고기프트 탭에서 별로 선택한 에고기프트 ID 목록 (저장 시 JSON에 egogiftIds로 포함) */
@@ -417,6 +524,144 @@ export default function FavoritesPage() {
     difficulties?: string[];
     difficultyFloors?: Array<{ difficulty: string; floors: number[] }>;
   }>>([]);
+
+  const filteredShareBoardPosts = shareBoardPosts;
+
+  const shareBoardPreviewEgoGiftsExcludingObserved = useMemo(() => {
+    if (shareBoardPreviewObservedEgoGiftIds.length === 0) return shareBoardPreviewEgoGifts;
+    const observedSet = new Set(shareBoardPreviewObservedEgoGiftIds);
+    return shareBoardPreviewEgoGifts.filter((eg) => !observedSet.has(eg.egogiftId));
+  }, [shareBoardPreviewEgoGifts, shareBoardPreviewObservedEgoGiftIds]);
+
+  const shareBoardPreviewEgoGiftsByKeyword = useMemo(() => {
+    const map = new Map<string, typeof shareBoardPreviewEgoGifts>();
+    for (const eg of shareBoardPreviewEgoGiftsExcludingObserved) {
+      const key = (eg.keywordName ?? "기타").trim() || "기타";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(eg);
+    }
+    const ordered: Array<{ keyword: string; egogifts: typeof shareBoardPreviewEgoGifts }> = [];
+    for (const kw of RESULT_KEYWORD_ORDER) {
+      const list = map.get(kw);
+      if (list && list.length > 0) {
+        ordered.push({
+          keyword: kw,
+          egogifts: [...list].sort((a, b) => {
+            const td = previewTierSortOrder(a.giftTier) - previewTierSortOrder(b.giftTier);
+            if (td !== 0) return td;
+            return previewGradeSortOrder(a.grades) - previewGradeSortOrder(b.grades);
+          }),
+        });
+      }
+    }
+    const rest = Array.from(map.keys()).filter((k) => !RESULT_KEYWORD_ORDER.includes(k)).sort((a, b) => a.localeCompare(b, "ko"));
+    for (const kw of rest) {
+      const list = map.get(kw)!;
+      ordered.push({
+        keyword: kw,
+        egogifts: [...list].sort((a, b) => {
+          const td = previewTierSortOrder(a.giftTier) - previewTierSortOrder(b.giftTier);
+          if (td !== 0) return td;
+          return previewGradeSortOrder(a.grades) - previewGradeSortOrder(b.grades);
+        }),
+      });
+    }
+    return ordered;
+  }, [shareBoardPreviewEgoGiftsExcludingObserved]);
+
+  const shareBoardPreviewEgoGiftsFlat = useMemo(() => {
+    return [...shareBoardPreviewEgoGiftsExcludingObserved].sort((a, b) => {
+      const td = previewTierSortOrder(a.giftTier) - previewTierSortOrder(b.giftTier);
+      if (td !== 0) return td;
+      const gd = previewGradeSortOrder(a.grades) - previewGradeSortOrder(b.grades);
+      if (gd !== 0) return gd;
+      return (a.giftName ?? "").localeCompare(b.giftName ?? "", "ko");
+    });
+  }, [shareBoardPreviewEgoGiftsExcludingObserved]);
+
+  const shareBoardPreviewCardPackById = useMemo(() => {
+    const m = new Map<number, { cardpackId: number; title: string; thumbnail?: string; floors?: number[]; difficulties?: string[] }>();
+    shareBoardPreviewCardPacks.forEach((p) => m.set(p.cardpackId, p));
+    return m;
+  }, [shareBoardPreviewCardPacks]);
+
+  const shareBoardPreviewObservableCatalog = useMemo<ObservableEgoCatalogItem[]>(() => {
+    return shareBoardPreviewEgoGifts
+      .map((eg) => ({
+        egogiftId: eg.egogiftId,
+        giftName: eg.giftName,
+        keywordName: (eg.keywordName ?? "기타").trim() || "기타",
+        giftTier: eg.giftTier,
+        grades: eg.grades,
+        synthesisYn: eg.synthesisYn,
+        thumbnail: eg.thumbnail,
+      }));
+  }, [shareBoardPreviewEgoGifts]);
+
+  const shareBoardPreviewFloorRows = useMemo(() => {
+    const rows: Array<{
+      floor: number;
+      cardpackId: number;
+      title: string;
+      thumbnail?: string;
+      limitedEgoGifts: typeof shareBoardPreviewEgoGifts;
+    }> = [];
+    for (const [floorRaw, packId] of Object.entries(shareBoardPreviewCheckedCardPackByFloor)) {
+        const floor = Number(floorRaw);
+        const cardpackId = Number(packId);
+        if (!Number.isFinite(floor) || floor <= 0 || !Number.isFinite(cardpackId) || cardpackId <= 0) continue;
+        const pack = shareBoardPreviewCardPackById.get(cardpackId);
+        if (!pack) continue;
+        const limitedEgoGifts = shareBoardPreviewEgoGiftsExcludingObserved.filter((eg) =>
+          (eg.limitedCategoryNames ?? []).some((name) => name === pack.title)
+        );
+        rows.push({ floor, cardpackId, title: pack.title, thumbnail: pack.thumbnail, limitedEgoGifts });
+    }
+    rows.sort((a, b) => a.floor - b.floor);
+    return rows;
+  }, [shareBoardPreviewCheckedCardPackByFloor, shareBoardPreviewCardPackById, shareBoardPreviewEgoGiftsExcludingObserved]);
+
+  const shareBoardPreviewFloorRowsForDisplay = useMemo(
+    () =>
+      shareBoardPreviewFloorRows.map((row) => {
+        if (row.limitedEgoGifts.length === 0) return row;
+        const limitedIdSet = new Set(row.limitedEgoGifts.map((e) => e.egogiftId));
+        const sorted = shareBoardPreviewEgoGiftsFlat.filter((eg) => limitedIdSet.has(eg.egogiftId));
+        const sortedIds = new Set(sorted.map((e) => e.egogiftId));
+        for (const eg of row.limitedEgoGifts) {
+          if (!sortedIds.has(eg.egogiftId)) sorted.push(eg);
+        }
+        return { ...row, limitedEgoGifts: sorted };
+      }),
+    [shareBoardPreviewFloorRows, shareBoardPreviewEgoGiftsFlat]
+  );
+
+  const shareBoardPreviewEgoGiftsFlatExcludingFloorLimited = useMemo(() => {
+    if (shareBoardPreviewEgoGiftViewMode !== "floor") return shareBoardPreviewEgoGiftsFlat;
+    const shown = new Set<number>();
+    for (const row of shareBoardPreviewFloorRows) {
+      for (const eg of row.limitedEgoGifts) shown.add(eg.egogiftId);
+    }
+    if (shown.size === 0) return shareBoardPreviewEgoGiftsFlat;
+    return shareBoardPreviewEgoGiftsFlat.filter((eg) => !shown.has(eg.egogiftId));
+  }, [shareBoardPreviewEgoGiftViewMode, shareBoardPreviewEgoGiftsFlat, shareBoardPreviewFloorRows]);
+
+  const pushFavoritesRoute = useCallback((updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value == null || value === "") params.delete(key);
+      else params.set(key, value);
+    });
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [router, pathname, searchParams]);
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "egogift" || tab === "result" || tab === "share-board") {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
   const [resultStarredCardPacksLoading, setResultStarredCardPacksLoading] = useState(false);
   /** 결과 탭 즐겨찾기 카드팩: 난이도 필터 (저장 시 searchJson.cardPackDifficulty로 저장) */
   const [resultCardPackDifficulty, setResultCardPackDifficulty] = useState<string>("노말");
@@ -1088,9 +1333,6 @@ export default function FavoritesPage() {
   ]);
 
   // 결과 탭: 키워드별 그룹 (키워드 순서 고정, 기타는 맨 뒤), 그룹 내는 등급 낮은 순(1 → 2 → … → EX)
-  const RESULT_KEYWORD_ORDER = [
-    "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격", "범용", "기타",
-  ];
   const tierSortOrder = (tier: string | undefined): number => {
     if (tier == null || tier === "") return 99;
     const t = String(tier).trim().toUpperCase();
@@ -1266,9 +1508,15 @@ export default function FavoritesPage() {
     await captureCardPackListRegionAsImage(v2PlannedCardPacksSectionRef.current, "진행예정카드팩목록");
   }, [captureCardPackListRegionAsImage]);
 
+  const resultEgoGiftsExcludingObserved = useMemo(() => {
+    if (observedEgoGiftIds.length === 0) return resultEgoGifts;
+    const observedSet = new Set(observedEgoGiftIds);
+    return resultEgoGifts.filter((eg) => !observedSet.has(eg.egogiftId));
+  }, [resultEgoGifts, observedEgoGiftIds]);
+
   const resultEgoGiftsByKeyword = useMemo(() => {
     const map = new Map<string, typeof resultEgoGifts>();
-    for (const eg of resultEgoGifts) {
+    for (const eg of resultEgoGiftsExcludingObserved) {
       const key = eg.keywordName ?? "기타";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(eg);
@@ -1303,7 +1551,7 @@ export default function FavoritesPage() {
       }
     }
     return ordered;
-  }, [resultEgoGifts]);
+  }, [resultEgoGiftsExcludingObserved]);
 
   /** 모아보기: 키워드 순·등급 정렬 옵션을 반영한 단일 목록 */
   const resultEgoGiftsFlatDisplay = useMemo(() => {
@@ -1327,7 +1575,7 @@ export default function FavoritesPage() {
       const seen = new Set<number>();
       base = [];
       for (const id of starredEgoGiftIds) {
-        const eg = resultEgoGifts.find((e) => e.egogiftId === id);
+        const eg = resultEgoGiftsExcludingObserved.find((e) => e.egogiftId === id);
         if (eg != null && !seen.has(eg.egogiftId)) {
           base.push(eg);
           seen.add(eg.egogiftId);
@@ -1362,7 +1610,7 @@ export default function FavoritesPage() {
     flatTierSort,
     resultEgoGiftsByKeyword,
     starredEgoGiftIds,
-    resultEgoGifts,
+    resultEgoGiftsExcludingObserved,
   ]);
 
   /** 층별 보기: 층별 한정 블록에 이미 나온 에고는 하단 모아보기 그리드에서 제외 */
@@ -1386,8 +1634,8 @@ export default function FavoritesPage() {
     () =>
       resultEgoGiftViewMode === "floor" &&
       Object.keys(checkedCardPackByFloor).length > 0 &&
-      resultEgoGifts.some((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0),
-    [resultEgoGiftViewMode, checkedCardPackByFloor, resultEgoGifts]
+      resultEgoGiftsExcludingObserved.some((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0),
+    [resultEgoGiftViewMode, checkedCardPackByFloor, resultEgoGiftsExcludingObserved]
   );
 
   /** 층별 보기: 각 층「조합식」블록 + 하단 모아보기(`__flat__`) 조합식 — 전체 접기 토글 대상 키 */
@@ -1436,7 +1684,7 @@ export default function FavoritesPage() {
       setFloorLimitedRowsLoading(false);
       return;
     }
-    const limited = resultEgoGifts.filter((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0);
+    const limited = resultEgoGiftsExcludingObserved.filter((eg) => eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0);
     const floors = Object.keys(checkedCardPackByFloor)
       .map(Number)
       .filter((f) => !Number.isNaN(f))
@@ -1510,7 +1758,7 @@ export default function FavoritesPage() {
     resultEgoGiftViewMode,
     activeTab,
     checkedCardPackByFloor,
-    resultEgoGifts,
+    resultEgoGiftsExcludingObserved,
     selectedReportSchemaVersion,
     plannedCardPackDifficultyByFloor,
     resultCardPackDifficulty,
@@ -1548,6 +1796,21 @@ export default function FavoritesPage() {
     const t = setTimeout(() => setShareToastMessage(null), 2000);
     return () => clearTimeout(t);
   }, [shareToastMessage]);
+
+  useEffect(() => {
+    if (favoriteActionsMenuId == null) return;
+    const handleOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-favorite-actions-menu-root]")) return;
+      setFavoriteActionsMenuId(null);
+      setFavoriteActionsMenuPosition(null);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+    };
+  }, [favoriteActionsMenuId]);
 
   /** 기존 목록 제목과 비교해 중복 시 "제목 (1)", "제목 (2)" 형태로 고유 제목 반환 */
   const getUniqueReportTitle = (baseTitle: string, existingItems: FavoriteItem[]): string => {
@@ -1842,6 +2105,625 @@ export default function FavoritesPage() {
     }
   };
 
+  const fetchShareBoardPosts = useCallback(async () => {
+    setShareBoardLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("sort", shareBoardSort);
+      params.set("page", String(shareBoardPage));
+      params.set("size", "20");
+      params.set("popularOnly", shareBoardPopularOnly ? "true" : "false");
+      if (shareBoardSearchText.trim()) {
+        params.set("q", shareBoardSearchText.trim());
+        params.set("searchType", shareBoardSearchType);
+      }
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts?${params.toString()}`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const next: ShareBoardPostItem[] = Array.isArray(data.items)
+          ? data.items.map((raw: any) => ({
+              postId: Number(raw.postId),
+              favoriteId: Number(raw.favoriteId),
+              title: String(raw.title ?? ""),
+              description: String(raw.description ?? ""),
+              authorNickname: String(raw.authorNickname ?? ""),
+              createdAt: String(raw.createdAt ?? ""),
+              updatedAt: String(raw.updatedAt ?? ""),
+              viewCount: Number(raw.viewCount ?? 0),
+              recommendCount: Number(raw.recommendCount ?? 0),
+              periodRecommendCount: Number(raw.periodRecommendCount ?? 0),
+              recommendedByMe: Boolean(raw.recommendedByMe),
+              commentCount: Number(raw.commentCount ?? 0),
+              isMine: Boolean(raw.isMine),
+            }))
+          : [];
+        const normalizedItems = next.filter((post) => post.postId > 0);
+        setShareBoardPosts(normalizedItems);
+        const parsedTotalPages = Number(data.totalPages);
+        const parsedTotalCount = Number(data.totalCount);
+        setShareBoardTotalPages(
+          Number.isFinite(parsedTotalPages) && parsedTotalPages > 0
+            ? Math.max(1, Math.floor(parsedTotalPages))
+            : Math.max(1, Math.ceil(normalizedItems.length / 20) || 1)
+        );
+        setShareBoardTotalCount(
+          Number.isFinite(parsedTotalCount) && parsedTotalCount >= 0
+            ? Math.max(0, Math.floor(parsedTotalCount))
+            : normalizedItems.length
+        );
+      } else {
+        setShareBoardPosts([]);
+        setShareBoardTotalPages(1);
+        setShareBoardTotalCount(0);
+      }
+    } catch {
+      setShareBoardPosts([]);
+      setShareBoardTotalPages(1);
+      setShareBoardTotalCount(0);
+    } finally {
+      setShareBoardLoading(false);
+    }
+  }, [shareBoardSearchText, shareBoardSearchType, shareBoardSort, shareBoardPage, shareBoardPopularOnly]);
+
+  const fetchShareBoardComments = useCallback(async (postId: number) => {
+    if (!Number.isFinite(postId) || postId <= 0) {
+      setShareBoardComments([]);
+      return;
+    }
+    setShareBoardCommentsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts/${postId}/comments`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const next: ShareBoardCommentItem[] = Array.isArray(data.items)
+          ? data.items.map((raw: any) => ({
+              commentId: Number(raw.commentId),
+              postId: Number(raw.postId),
+              parentCommentId: raw.parentCommentId == null ? null : Number(raw.parentCommentId),
+              depth: Number(raw.depth ?? 1),
+              authorNickname: String(raw.authorNickname ?? ""),
+              content: String(raw.content ?? ""),
+              deletedYn: String(raw.deletedYn ?? "N"),
+              createdAt: String(raw.createdAt ?? ""),
+              updatedAt: String(raw.updatedAt ?? ""),
+              isMine: Boolean(raw.isMine),
+            }))
+          : [];
+        setShareBoardComments(next.filter((c) => c.commentId > 0));
+      } else {
+        setShareBoardComments([]);
+      }
+    } catch {
+      setShareBoardComments([]);
+    } finally {
+      setShareBoardCommentsLoading(false);
+    }
+  }, []);
+
+  const handleShareBoardToggleRecommend = async () => {
+    if (!shareBoardSelectedPost) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts/${shareBoardSelectedPost.postId}/recommend`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "추천 처리에 실패했습니다.");
+        return;
+      }
+      const recommendCount = Number(data.recommendCount ?? 0);
+      const recommendedByMe = Boolean(data.recommendedByMe);
+      setShareBoardSelectedPost((prev) => (prev ? { ...prev, recommendCount, recommendedByMe } : prev));
+      setShareBoardPosts((prev) =>
+        prev.map((p) =>
+          p.postId === shareBoardSelectedPost.postId ? { ...p, recommendCount, recommendedByMe } : p
+        )
+      );
+    } catch {
+      setError("추천 처리에 실패했습니다.");
+    }
+  };
+
+  const submitShareBoardComment = async (content: string, parentCommentId?: number | null) => {
+    if (!shareBoardSelectedPost) return;
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    setShareBoardCommentSubmitting(true);
+    try {
+      const body: Record<string, unknown> = { content: trimmed };
+      if (parentCommentId) body.parentCommentId = parentCommentId;
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts/${shareBoardSelectedPost.postId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "댓글 등록에 실패했습니다.");
+        return;
+      }
+      setShareBoardCommentInput("");
+      setShareBoardReplyInput("");
+      setShareBoardReplyParentId(null);
+      await fetchShareBoardComments(shareBoardSelectedPost.postId);
+    } catch {
+      setError("댓글 등록에 실패했습니다.");
+    } finally {
+      setShareBoardCommentSubmitting(false);
+    }
+  };
+
+  const deleteShareBoardComment = async (commentId: number) => {
+    if (!shareBoardSelectedPost) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/comments/${commentId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "댓글 삭제에 실패했습니다.");
+        return;
+      }
+      await fetchShareBoardComments(shareBoardSelectedPost.postId);
+    } catch {
+      setError("댓글 삭제에 실패했습니다.");
+    }
+  };
+
+  const moveToShareBoardWithFavorite = (e: React.MouseEvent, favoriteId: number) => {
+    e.stopPropagation();
+    const target = items.find((it) => it.favoriteId === favoriteId);
+    let suggestedTitle = "";
+    try {
+      const parsed = target ? (JSON.parse(target.searchJson) as { title?: string }) : null;
+      suggestedTitle = (parsed?.title ?? "").trim();
+    } catch {
+      suggestedTitle = "";
+    }
+    setShareBoardFavoriteId(favoriteId);
+    setShareBoardTitleInput(suggestedTitle);
+    setShareBoardDescriptionInput("");
+    setActiveTab("share-board");
+    pushFavoritesRoute({
+      tab: "share-board",
+      shareBoardMode: "new",
+      favoriteId: String(favoriteId),
+      postId: null,
+    });
+  };
+
+  const handleShareBoardRegister = async () => {
+    if (!shareBoardFavoriteId) {
+      setError("공유할 보고서를 선택해주세요.");
+      return;
+    }
+    const title = shareBoardTitleInput.trim();
+    if (!title) {
+      setError("게시글 제목을 입력해주세요.");
+      return;
+    }
+    setShareBoardRegistering(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          favoriteId: shareBoardFavoriteId,
+          title,
+          description: shareBoardDescriptionInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const createdPostId = Number(data.data?.postId ?? 0);
+        setShareBoardTitleInput("");
+        setShareBoardDescriptionInput("");
+        await fetchShareBoardPosts();
+        setShareToastMessage("공유게시판에 등록되었습니다.");
+        if (createdPostId > 0) {
+          await handleShareBoardOpenPost(createdPostId);
+        } else {
+          pushFavoritesRoute({ tab: "share-board", shareBoardMode: "list", postId: null, favoriteId: null });
+        }
+      } else {
+        setError(data.message ?? "공유게시판 등록에 실패했습니다.");
+      }
+    } catch {
+      setError("공유게시판 등록에 실패했습니다.");
+    } finally {
+      setShareBoardRegistering(false);
+    }
+  };
+
+  const handleShareBoardOpenPost = async (postId: number) => {
+    pushFavoritesRoute({
+      tab: "share-board",
+      shareBoardMode: "detail",
+      postId: String(postId),
+      favoriteId: null,
+    });
+    setImporting(true);
+    setError(null);
+    try {
+      const detailRes = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts/${postId}`, {
+        credentials: "include",
+      });
+      const detailData = await detailRes.json();
+      if (!detailRes.ok || !detailData.success || !detailData.data?.searchJson) {
+        setError(detailData.message ?? "게시글을 불러오지 못했습니다.");
+        return;
+      }
+      setShareBoardSelectedPost({
+        postId: Number(detailData.data.postId),
+        favoriteId: Number(detailData.data.favoriteId),
+        title: String(detailData.data.title ?? ""),
+        description: String(detailData.data.description ?? ""),
+        authorNickname: String(detailData.data.authorNickname ?? ""),
+        createdAt: String(detailData.data.createdAt ?? ""),
+        updatedAt: String(detailData.data.updatedAt ?? ""),
+        viewCount: Number(detailData.data.viewCount ?? 0),
+        recommendCount: Number(detailData.data.recommendCount ?? 0),
+        recommendedByMe: Boolean(detailData.data.recommendedByMe),
+        commentCount: Number(detailData.data.commentCount ?? 0),
+        pageType: String(detailData.data.pageType ?? "FAVORITE"),
+        searchJson: String(detailData.data.searchJson ?? "{}"),
+        schemaVersion: Number(detailData.data.schemaVersion ?? 1),
+        isMine: Boolean(detailData.data.isMine),
+      });
+      setShareBoardEditing(false);
+      setShareBoardEditTitle("");
+      setShareBoardEditDescription("");
+      await fetchShareBoardComments(Number(detailData.data.postId));
+      await fetchShareBoardPosts();
+    } catch {
+      setError("게시글을 불러오지 못했습니다.");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleShareBoardCopyToReport = async () => {
+    if (!shareBoardSelectedPost?.searchJson) return;
+    const uuid = getOrCreateUUID();
+    if (!uuid) {
+      setError("UUID를 생성할 수 없습니다.");
+      return;
+    }
+    setImporting(true);
+    setError(null);
+    try {
+      const saveRes = await fetch(`${API_BASE_URL}/user/favorite-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-UUID": uuid },
+        credentials: "include",
+        body: JSON.stringify({
+          pageType: "FAVORITE",
+          searchJson: shareBoardSelectedPost.searchJson,
+        }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveRes.ok || !saveData.success || !saveData.data) {
+        setError(saveData.message ?? "게시글 보고서 복사에 실패했습니다.");
+        return;
+      }
+
+      const savedFavoriteId = Number(saveData.data.favoriteId);
+      const updatedItems = await fetchFavorites();
+      const parsed = JSON.parse(String(saveData.data.searchJson ?? "{}")) as {
+        title?: string;
+        egogiftIds?: number[];
+        cardPackIds?: number[];
+        cardPackDifficulty?: string;
+        cardPackCheckedByFloor?: Record<string, number>;
+        plannedCardPackDifficultyByFloor?: Record<string, string>;
+        plannedFloorRowCount?: number;
+        checkedEgoGiftIds?: number[];
+        observedEgoGiftIds?: number[];
+        resultEgoGiftViewByKeyword?: boolean;
+        resultEgoGiftViewMode?: string;
+      };
+
+      v2AutosaveSkipNextRef.current = true;
+      setSelectedFavoriteId(savedFavoriteId);
+      setActiveTab("result");
+      const importedTitle = (parsed.title ?? "").trim();
+      setTitleInput(importedTitle ? getUniqueReportTitle(importedTitle, updatedItems) : "");
+      setStarredEgoGiftIds(Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds : []);
+      setStarredCardPackIds(Array.isArray(parsed.cardPackIds) ? parsed.cardPackIds : []);
+      setResultCardPackDifficulty(parsed.cardPackDifficulty === "하드" || parsed.cardPackDifficulty === "익스트림" ? parsed.cardPackDifficulty : parsed.cardPackDifficulty === "평행중첩" ? "익스트림" : "노말");
+      const byFloor = parsed.cardPackCheckedByFloor && typeof parsed.cardPackCheckedByFloor === "object"
+        ? Object.fromEntries(Object.entries(parsed.cardPackCheckedByFloor).map(([k, v]) => [Number(k), v]).filter(([k]) => !Number.isNaN(k)))
+        : {};
+      setCheckedCardPackByFloor(byFloor as Record<number, number>);
+      setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
+      setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
+      setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
+      setObservedEgoGiftIds(
+        Array.isArray(parsed.observedEgoGiftIds)
+          ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
+          : [],
+      );
+      setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
+      setShareToastMessage("게시글을 보고서로 복사했습니다.");
+    } catch {
+      setError("게시글 보고서 복사에 실패했습니다.");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const startShareBoardEdit = () => {
+    if (!shareBoardSelectedPost) return;
+    setShareBoardEditing(true);
+    setShareBoardEditTitle(shareBoardSelectedPost.title);
+    setShareBoardEditDescription(shareBoardSelectedPost.description ?? "");
+  };
+
+  const handleShareBoardUpdate = async () => {
+    if (!shareBoardSelectedPost) return;
+    const title = shareBoardEditTitle.trim();
+    if (!title) {
+      setError("제목을 입력해주세요.");
+      return;
+    }
+    setShareBoardUpdating(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts/${shareBoardSelectedPost.postId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title,
+          description: shareBoardEditDescription.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "게시글 수정에 실패했습니다.");
+        return;
+      }
+      setShareBoardEditing(false);
+      await handleShareBoardOpenPost(shareBoardSelectedPost.postId);
+      setShareToastMessage("게시글을 수정했습니다.");
+    } catch {
+      setError("게시글 수정에 실패했습니다.");
+    } finally {
+      setShareBoardUpdating(false);
+    }
+  };
+
+  const handleShareBoardDelete = async () => {
+    if (!shareBoardSelectedPost) return;
+    if (!confirm("이 게시글을 삭제할까요?")) return;
+    setShareBoardDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/share-board/posts/${shareBoardSelectedPost.postId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "게시글 삭제에 실패했습니다.");
+        return;
+      }
+      setShareBoardSelectedPost(null);
+      setShareBoardEditing(false);
+      await fetchShareBoardPosts();
+      pushFavoritesRoute({ tab: "share-board", shareBoardMode: "list", postId: null, favoriteId: null });
+      setShareToastMessage("게시글을 삭제했습니다.");
+    } catch {
+      setError("게시글 삭제에 실패했습니다.");
+    } finally {
+      setShareBoardDeleting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "share-board") {
+      fetchShareBoardPosts();
+    }
+  }, [activeTab, fetchShareBoardPosts]);
+
+  useEffect(() => {
+    setShareBoardPage(1);
+  }, [shareBoardSort, shareBoardSearchType, shareBoardSearchText, shareBoardPopularOnly]);
+
+  const prevActiveTabRef = useRef<FavoritesTab | null>(null);
+  useEffect(() => {
+    const prev = prevActiveTabRef.current;
+    if (activeTab === "share-board" && prev != null && prev !== "share-board") {
+      setShareBoardSelectedPost(null);
+      setShareBoardEditing(false);
+      setShareBoardComments([]);
+      setShareBoardReplyParentId(null);
+      setShareBoardReplyInput("");
+    }
+    prevActiveTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "share-board") return;
+    if (shareBoardMode === "new") {
+      if (shareBoardFavoriteIdParam > 0) {
+        setShareBoardFavoriteId(shareBoardFavoriteIdParam);
+      }
+      setShareBoardSelectedPost(null);
+      setShareBoardComments([]);
+    } else if (shareBoardMode === "list") {
+      setShareBoardSelectedPost(null);
+      setShareBoardEditing(false);
+      setShareBoardComments([]);
+    }
+  }, [activeTab, shareBoardMode, shareBoardFavoriteIdParam]);
+
+  useEffect(() => {
+    if (activeTab !== "share-board") return;
+    if (shareBoardMode !== "detail") return;
+    if (!Number.isFinite(shareBoardPostIdParam) || shareBoardPostIdParam <= 0) return;
+    if (shareBoardSelectedPost?.postId === shareBoardPostIdParam) return;
+    void handleShareBoardOpenPost(shareBoardPostIdParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, shareBoardMode, shareBoardPostIdParam]);
+
+  useEffect(() => {
+    if (activeTab !== "share-board" || shareBoardMode !== "detail" || !shareBoardSelectedPost?.searchJson) {
+      setShareBoardPreviewCardPacks([]);
+      setShareBoardPreviewEgoGifts([]);
+      setShareBoardPreviewSynthesisRecipes([]);
+      setShareBoardPreviewCheckedCardPackByFloor({});
+      setShareBoardPreviewPlannedCardPackDifficultyByFloor({});
+      setShareBoardPreviewObservedEgoGiftIds([]);
+      setShareBoardPreviewSchemaVersion(1);
+      setShareBoardPreviewEgoGiftViewMode("keyword");
+      setShareBoardPreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setShareBoardPreviewLoading(true);
+    try {
+      const parsed = JSON.parse(shareBoardSelectedPost.searchJson) as {
+        cardPackIds?: number[];
+        egogiftIds?: number[];
+        cardPackCheckedByFloor?: Record<string, number>;
+        plannedCardPackDifficultyByFloor?: Record<string, string>;
+        observedEgoGiftIds?: number[];
+        resultEgoGiftViewMode?: ResultEgoGiftViewMode;
+        resultEgoGiftViewByKeyword?: boolean;
+      };
+      setShareBoardPreviewSchemaVersion(Number(shareBoardSelectedPost.schemaVersion ?? 1));
+      const cardPackIds = Array.isArray(parsed.cardPackIds) ? parsed.cardPackIds.map(Number).filter((n) => Number.isFinite(n) && n > 0) : [];
+      const egogiftIds = Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds.map(Number).filter((n) => Number.isFinite(n) && n > 0) : [];
+      const observedIds = Array.isArray(parsed.observedEgoGiftIds)
+        ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
+        : [];
+      const allEgoGiftIds = [...new Set([...egogiftIds, ...observedIds])];
+      const byFloor = parsed.cardPackCheckedByFloor && typeof parsed.cardPackCheckedByFloor === "object"
+        ? Object.fromEntries(
+            Object.entries(parsed.cardPackCheckedByFloor)
+              .map(([k, v]) => [Number(k), Number(v)] as const)
+              .filter(([k, v]) => Number.isFinite(k) && k > 0 && Number.isFinite(v) && v > 0)
+          )
+        : {};
+      setShareBoardPreviewCheckedCardPackByFloor(byFloor as Record<number, number>);
+      setShareBoardPreviewPlannedCardPackDifficultyByFloor(
+        parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor)
+      );
+      setShareBoardPreviewObservedEgoGiftIds(
+        observedIds
+      );
+      setShareBoardPreviewEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
+
+      const cardPackTask = (async () => {
+        if (cardPackIds.length === 0) return [] as Array<{ cardpackId: number; title: string; thumbnail?: string; floors?: number[]; difficulties?: string[] }>;
+        const query = cardPackIds.map((id) => `ids=${id}`).join("&");
+        const res = await fetch(`${API_BASE_URL}/user/cardpack/by-ids?${query}`, { credentials: "include" });
+        if (!res.ok) return [];
+        const data = await res.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        return items.map((item: any) => ({
+          cardpackId: Number(item.cardpackId),
+          title: String(item.title ?? ""),
+          thumbnail: item.thumbnail ?? undefined,
+          floors: Array.isArray(item.floors) ? item.floors.map((x: unknown) => Number(x)).filter((n: number) => Number.isFinite(n)) : [],
+          difficulties: Array.isArray(item.difficulties) ? item.difficulties.map((x: unknown) => String(x)) : [],
+        })).filter((item: { cardpackId: number }) => item.cardpackId > 0);
+      })();
+
+      const egoGiftTask = (async () => {
+        if (allEgoGiftIds.length === 0) return [] as Array<{ egogiftId: number; giftName: string; thumbnail?: string; giftTier?: string; keywordName?: string; grades?: string[]; synthesisYn?: string; limitedCategoryNames?: string[] }>;
+        const res = await fetch(`${API_BASE_URL}/user/egogift?page=0&size=10000`, { credentials: "include" });
+        if (!res.ok) return [];
+        const data = await res.json();
+        const allItems = Array.isArray(data.items) ? data.items : [];
+        const idSet = new Set(allEgoGiftIds);
+        return allItems
+          .filter((item: any) => idSet.has(Number(item.egogiftId)))
+          .map((item: any) => ({
+            egogiftId: Number(item.egogiftId),
+            giftName: String(item.giftName ?? ""),
+            thumbnail: item.thumbnail ?? item.thumbnail_path ?? undefined,
+            giftTier: item.giftTier ?? item.gift_tier ?? undefined,
+            keywordName: item.keywordName ? String(item.keywordName).trim() || "기타" : "기타",
+            grades: Array.isArray(item.grades) ? item.grades.map((x: unknown) => String(x).trim().toUpperCase()).filter(Boolean) : [],
+            synthesisYn: item.synthesisYn ?? item.synthesis_yn ?? undefined,
+            limitedCategoryNames: Array.isArray(item.limitedCategoryNames)
+              ? item.limitedCategoryNames.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
+              : [],
+          }))
+          .filter((item: { egogiftId: number }) => item.egogiftId > 0);
+      })();
+
+      Promise.all([cardPackTask, egoGiftTask])
+        .then(async ([cardPacks, egoGifts]) => {
+          if (cancelled) return;
+          setShareBoardPreviewCardPacks(cardPacks);
+          setShareBoardPreviewEgoGifts(egoGifts);
+          const synthesisIds = [
+            ...new Set(
+              egoGifts
+                .map((eg: { egogiftId: number }) => eg.egogiftId)
+                .filter((id: number) => Number.isFinite(id) && id > 0)
+            ),
+          ];
+          if (synthesisIds.length === 0) {
+            setShareBoardPreviewSynthesisRecipes([]);
+            return;
+          }
+          const q = synthesisIds.map((id) => `egogiftIds=${id}`).join("&");
+          try {
+            const synRes = await fetch(`${API_BASE_URL}/user/egogift/synthesis-recipes?${q}`, { credentials: "include" });
+            const synData = synRes.ok ? await synRes.json() : [];
+            if (cancelled) return;
+            const list = Array.isArray(synData)
+              ? synData.map((r: any) => ({
+                  resultEgogiftId: Number(r.resultEgogiftId),
+                  resultGiftName: String(r.resultGiftName ?? ""),
+                  resultThumbnail: r.resultThumbnail,
+                  resultGrades: Array.isArray(r.resultGrades) ? r.resultGrades : undefined,
+                  materials: (Array.isArray(r.materials) ? r.materials : []).map((m: any) => ({
+                    egogiftId: Number(m.egogiftId),
+                    giftName: String(m.giftName ?? ""),
+                    thumbnail: m.thumbnail,
+                    grades: Array.isArray(m.grades) ? m.grades : undefined,
+                  })),
+                }))
+              : [];
+            setShareBoardPreviewSynthesisRecipes(list);
+          } catch {
+            if (!cancelled) setShareBoardPreviewSynthesisRecipes([]);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setShareBoardPreviewLoading(false);
+        });
+    } catch {
+      setShareBoardPreviewCardPacks([]);
+      setShareBoardPreviewEgoGifts([]);
+      setShareBoardPreviewSynthesisRecipes([]);
+      setShareBoardPreviewLoading(false);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    shareBoardMode,
+    shareBoardSelectedPost?.postId,
+    shareBoardSelectedPost?.searchJson,
+    shareBoardSelectedPost?.schemaVersion,
+  ]);
+
   const handleImportShare = () => {
     const uuid = getOrCreateUUID();
     if (!uuid) {
@@ -2000,6 +2882,11 @@ export default function FavoritesPage() {
     e.stopPropagation();
     setDeleteConfirmFavoriteId(favoriteId);
   };
+
+  const favoriteActionsTarget = useMemo(
+    () => (favoriteActionsMenuId == null ? null : items.find((item) => item.favoriteId === favoriteActionsMenuId) ?? null),
+    [favoriteActionsMenuId, items]
+  );
 
   /** 즐겨찾기 영역 (에고기프트 탭에서는 검색 조건 위에 붙여 표시) */
   const favoritesPanel = (
@@ -2247,41 +3134,26 @@ export default function FavoritesPage() {
                             ver. {item.schemaVersion ?? 1}
                           </span>
                         </div>
-                        <div className="shrink-0 flex items-center gap-0.5">
+                        <div className="relative shrink-0" data-favorite-actions-menu-root>
                           <button
                             type="button"
-                            onClick={(e) => startEditTitle(e, item)}
-                            disabled={editingId !== null}
-                            className="p-1 rounded text-gray-400 hover:bg-white/10 hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="제목 수정"
-                            aria-label="제목 수정"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const nextId = favoriteActionsMenuId === item.favoriteId ? null : item.favoriteId;
+                              setFavoriteActionsMenuId(nextId);
+                              if (nextId != null) {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                setFavoriteActionsMenuPosition({ top: rect.bottom + 4, left: rect.left });
+                              } else {
+                                setFavoriteActionsMenuPosition(null);
+                              }
+                            }}
+                            className="p-1 rounded text-gray-300 hover:bg-white/10 hover:text-yellow-200 transition-colors"
+                            title="보고서 작업 메뉴"
+                            aria-label="보고서 작업 메뉴"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleShare(e, item.favoriteId)}
-                            disabled={sharingId !== null}
-                            className="p-1 rounded text-amber-400/90 hover:bg-amber-400/20 hover:text-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="공유"
-                            aria-label="공유"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                              <path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDelete(e, item.favoriteId)}
-                            disabled={deletingId !== null}
-                            className="p-1 rounded text-red-400 hover:bg-red-400/20 hover:text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="삭제"
-                            aria-label="삭제"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                              <path d="M10 3a1.75 1.75 0 110 3.5A1.75 1.75 0 0110 3zM10 8.25a1.75 1.75 0 110 3.5 1.75 1.75 0 010-3.5zM11.75 15a1.75 1.75 0 11-3.5 0 1.75 1.75 0 013.5 0z" />
                             </svg>
                           </button>
                         </div>
@@ -2338,6 +3210,67 @@ export default function FavoritesPage() {
             {shareToastMessage}
           </div>
         </div>
+      )}
+
+      {favoriteActionsTarget && favoriteActionsMenuPosition && typeof window !== "undefined" && createPortal(
+        <div
+          data-favorite-actions-menu-root
+          className="fixed z-[1200] inline-flex w-fit flex-col rounded-md border border-[#b8860b]/40 bg-[#1a1a1d] shadow-lg py-1"
+          style={{
+            top: Math.max(8, Math.round(favoriteActionsMenuPosition.top)),
+            left: Math.max(8, Math.round(favoriteActionsMenuPosition.left)),
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              startEditTitle(e, favoriteActionsTarget);
+              setFavoriteActionsMenuId(null);
+              setFavoriteActionsMenuPosition(null);
+            }}
+            disabled={editingId !== null}
+            className="whitespace-nowrap text-left px-3 py-1.5 text-sm text-gray-200 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            제목 수정
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              handleShare(e, favoriteActionsTarget.favoriteId);
+              setFavoriteActionsMenuId(null);
+              setFavoriteActionsMenuPosition(null);
+            }}
+            disabled={sharingId !== null}
+            className="whitespace-nowrap text-left px-3 py-1.5 text-sm text-amber-300 hover:bg-amber-400/15 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            공유
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              moveToShareBoardWithFavorite(e, favoriteActionsTarget.favoriteId);
+              setFavoriteActionsMenuId(null);
+              setFavoriteActionsMenuPosition(null);
+            }}
+            className="whitespace-nowrap text-left px-3 py-1.5 text-sm text-cyan-200 hover:bg-cyan-400/15"
+          >
+            공유게시판 등록
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              handleDelete(e, favoriteActionsTarget.favoriteId);
+              setFavoriteActionsMenuId(null);
+              setFavoriteActionsMenuPosition(null);
+            }}
+            disabled={deletingId !== null}
+            className="whitespace-nowrap text-left px-3 py-1.5 text-sm text-red-300 hover:bg-red-400/15 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            삭제
+          </button>
+        </div>,
+        document.body
       )}
 
       {/* 삭제 확인 모달 */}
@@ -2477,7 +3410,14 @@ export default function FavoritesPage() {
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setActiveTab(key)}
+                  onClick={() => {
+                    setActiveTab(key);
+                    if (key === "share-board") {
+                      pushFavoritesRoute({ tab: "share-board", shareBoardMode: "list", postId: null, favoriteId: null });
+                    } else {
+                      pushFavoritesRoute({ tab: key, shareBoardMode: null, postId: null, favoriteId: null });
+                    }
+                  }}
                   className={`px-4 py-2 rounded transition-colors ${
                     activeTab === key
                       ? "bg-yellow-400 text-black font-semibold"
@@ -2498,6 +3438,7 @@ export default function FavoritesPage() {
                 starredEgoGiftIds={starredEgoGiftIds}
                 onStarClick={handleStarToggle}
                 openEgoGiftPreviewRef={egoGiftPreviewOpenRef}
+                enableSynthesisMaterialsPrefetch
               />
             ) : (
               <div className="flex flex-col lg:flex-row gap-6">
@@ -2511,6 +3452,588 @@ export default function FavoritesPage() {
                 </div>
               </div>
             )
+          ) : activeTab === "share-board" ? (
+            <div className="w-full">
+              <div className="w-full">
+                {activeTab === "share-board" && (
+                  <div className="space-y-4">
+                    <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <h3 className="text-lg font-semibold text-yellow-300">
+                          {shareBoardMode === "new" ? "공유게시판 등록" : shareBoardMode === "detail" ? "게시글 상세" : "공유게시판 목록"}
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => pushFavoritesRoute({ tab: "share-board", shareBoardMode: "list", postId: null, favoriteId: null })}
+                            className="px-3 py-1.5 text-sm rounded border border-[#b8860b]/40 text-gray-200 hover:bg-[#2a2a2d]"
+                          >
+                            목록
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => pushFavoritesRoute({ tab: "share-board", shareBoardMode: "new", postId: null, favoriteId: shareBoardFavoriteId ? String(shareBoardFavoriteId) : null })}
+                            className="px-3 py-1.5 text-sm rounded border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/10"
+                          >
+                            등록
+                          </button>
+                        </div>
+                      </div>
+
+                      {shareBoardMode === "new" && (
+                        <div className="grid gap-3">
+                          <div>
+                            <label className="block text-sm text-gray-300 mb-1">기존 보고서 선택</label>
+                            <select
+                              value={shareBoardFavoriteId}
+                              onChange={(e) => setShareBoardFavoriteId(e.target.value ? Number(e.target.value) : "")}
+                              className="w-full px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                            >
+                              <option value="">보고서를 선택하세요</option>
+                              {items.map((item) => {
+                                let reportTitle = `보고서 ${item.favoriteId}`;
+                                try {
+                                  const parsed = JSON.parse(item.searchJson) as { title?: string };
+                                  reportTitle = (parsed.title ?? "").trim() || reportTitle;
+                                } catch {
+                                  // noop
+                                }
+                                return (
+                                  <option key={item.favoriteId} value={item.favoriteId}>
+                                    {reportTitle}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm text-gray-300 mb-1">게시글 제목</label>
+                            <input
+                              type="text"
+                              value={shareBoardTitleInput}
+                              onChange={(e) => setShareBoardTitleInput(e.target.value)}
+                              placeholder="게시글 제목 입력"
+                              className="w-full px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-gray-300 mb-1">설명</label>
+                            <textarea
+                              value={shareBoardDescriptionInput}
+                              onChange={(e) => setShareBoardDescriptionInput(e.target.value)}
+                              placeholder="설명 입력"
+                              rows={3}
+                              className="w-full px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                            />
+                          </div>
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleShareBoardRegister}
+                              disabled={shareBoardRegistering}
+                              className="px-4 py-2 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {shareBoardRegistering ? "등록 중..." : "등록 완료"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {shareBoardMode === "detail" && (
+                        <>
+                          {!shareBoardSelectedPost ? (
+                            <p className="text-sm text-gray-400">게시글을 불러오는 중...</p>
+                          ) : (
+                            <div className="space-y-3">
+                              {shareBoardEditing ? (
+                                <>
+                                  <input type="text" value={shareBoardEditTitle} onChange={(e) => setShareBoardEditTitle(e.target.value)} className="w-full px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white" />
+                                  <textarea value={shareBoardEditDescription} onChange={(e) => setShareBoardEditDescription(e.target.value)} rows={4} className="w-full px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white" />
+                                  <div className="flex items-center gap-2 justify-end">
+                                    <button type="button" onClick={() => setShareBoardEditing(false)} className="px-3 py-2 rounded border border-gray-500/50 text-gray-300 hover:bg-white/5">취소</button>
+                                    <button type="button" onClick={handleShareBoardUpdate} disabled={shareBoardUpdating} className="px-3 py-2 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-500 disabled:opacity-50">
+                                      {shareBoardUpdating ? "저장 중..." : "수정 저장"}
+                                    </button>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="text-xl font-semibold text-yellow-200">{shareBoardSelectedPost.title}</div>
+                                  <div className="text-sm text-gray-400">
+                                    작성자: {shareBoardSelectedPost.authorNickname || "사용자"} · 추천 {shareBoardSelectedPost.recommendCount ?? 0} · 댓글 {shareBoardSelectedPost.commentCount ?? 0} · 조회 {shareBoardSelectedPost.viewCount} · {shareBoardSelectedPost.createdAt ? new Date(shareBoardSelectedPost.createdAt).toLocaleString() : "-"}
+                                  </div>
+                                  <div className="text-sm text-gray-200 whitespace-pre-wrap min-h-[60px] bg-[#1a1a1d] border border-[#b8860b]/20 rounded p-3">
+                                    {shareBoardSelectedPost.description || "설명 없음"}
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <button type="button" onClick={handleShareBoardCopyToReport} disabled={importing} className="px-3 py-2 rounded bg-cyan-400 text-black font-semibold hover:bg-cyan-300 disabled:opacity-50">
+                                      {importing ? "복사 중..." : "보고서로 복사"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleShareBoardToggleRecommend}
+                                      className={`px-3 py-2 rounded border font-semibold transition-colors ${shareBoardSelectedPost.recommendedByMe ? "border-emerald-400/60 text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20" : "border-[#b8860b]/40 text-yellow-300 hover:bg-yellow-500/10"}`}
+                                    >
+                                      {shareBoardSelectedPost.recommendedByMe ? "추천 취소" : "추천"} ({shareBoardSelectedPost.recommendCount ?? 0})
+                                    </button>
+                                    {shareBoardSelectedPost.isMine && (
+                                      <div className="ml-auto flex items-center gap-2">
+                                        <button type="button" onClick={startShareBoardEdit} className="px-3 py-2 rounded border border-[#b8860b]/40 text-yellow-300 hover:bg-yellow-500/10">수정</button>
+                                        <button type="button" onClick={handleShareBoardDelete} disabled={shareBoardDeleting} className="px-3 py-2 rounded border border-red-500/50 text-red-300 hover:bg-red-500/10 disabled:opacity-50">
+                                          {shareBoardDeleting ? "삭제 중..." : "삭제"}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="border-t border-[#b8860b]/30 pt-4 mt-2">
+                                    <div className="text-sm font-semibold text-yellow-300 mb-2">
+                                      공유 보고서 미리보기
+                                    </div>
+                                    {shareBoardPreviewLoading ? (
+                                      <p className="text-sm text-gray-400">보고서 내용을 불러오는 중...</p>
+                                    ) : (
+                                      <div className="space-y-4">
+                                        {shareBoardPreviewSchemaVersion === 2 && (
+                                          <div className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 overflow-visible pb-6">
+                                            <div className="border-b border-[#b8860b]/40 pb-3 mb-4">
+                                              <h4 className="text-base md:text-lg font-semibold text-yellow-200/90">진행(예정) 카드팩 목록</h4>
+                                            </div>
+                                            <div className="min-h-[120px] rounded-lg border border-[#b8860b]/30 bg-[#0d0d0f]/50 p-3 md:p-3 lg:p-4 overflow-visible">
+                                              <div className="w-full space-y-3 sm:space-y-4">
+                                                {V2_FLOOR_ROWS.map((rowFloors, rowIdx) => (
+                                                  <div key={rowIdx} className="w-full grid grid-cols-5 gap-1.5 sm:gap-2 md:gap-2 lg:gap-3">
+                                                    {rowFloors.map((floor) => {
+                                                      const packId = shareBoardPreviewCheckedCardPackByFloor[floor];
+                                                      const pack = packId ? shareBoardPreviewCardPackById.get(packId) : undefined;
+                                                      const slotDiff = shareBoardPreviewPlannedCardPackDifficultyByFloor[floor];
+                                                      const slotBorderClass = v2SlotBorderClass(slotDiff);
+                                                      return (
+                                                        <div key={floor} className={`flex flex-col items-stretch rounded-lg border bg-[#131316]/80 min-h-[180px] sm:min-h-[200px] md:min-h-[220px] lg:min-h-[240px] ${slotBorderClass}`}>
+                                                          <span className="text-center text-xs sm:text-sm md:text-base font-semibold text-yellow-200/90 py-1.5 md:py-2 border-b border-[#b8860b]/30 bg-[#131316] shrink-0 px-1 leading-tight">
+                                                            {floor}층 {slotDiff ? `· ${v2DifficultySlotLabel(slotDiff)}` : ""}
+                                                          </span>
+                                                          <div className="relative flex-1 flex flex-col items-center justify-center p-1.5 min-h-[140px] sm:min-h-[160px] md:min-h-[170px]">
+                                                            {pack ? (
+                                                              <>
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => cardPackDetailOpenRef.current?.open(pack.cardpackId)}
+                                                                  className="aspect-[1/2] w-full max-w-[3.5rem] sm:max-w-[4.25rem] md:max-w-none mx-auto rounded overflow-hidden bg-[#1a1a1a] mb-1 shrink-0 cursor-pointer hover:ring-2 hover:ring-yellow-300/70 transition"
+                                                                  title={`${pack.title} 상세 보기`}
+                                                                  aria-label={`${pack.title} 상세 보기`}
+                                                                >
+                                                                  {pack.thumbnail ? (
+                                                                    <img src={RESULT_EGOGIFT_BASE_URL + pack.thumbnail} alt="" className="w-full h-full object-cover" />
+                                                                  ) : (
+                                                                    <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 px-0.5 text-center">없음</div>
+                                                                  )}
+                                                                </button>
+                                                                <p className="text-[10px] sm:text-xs md:text-sm text-gray-200 line-clamp-2 text-center leading-snug w-full mt-0.5">{pack.title}</p>
+                                                              </>
+                                                            ) : (
+                                                              <span className="text-gray-500 text-xs sm:text-sm text-center px-1 leading-snug">비어 있음</span>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                      );
+                                                    })}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        <ObservedEgoGiftsSection
+                                          catalog={shareBoardPreviewObservableCatalog}
+                                          catalogLoading={false}
+                                          selectedIds={shareBoardPreviewObservedEgoGiftIds}
+                                          onChange={() => {}}
+                                          imageBaseUrl={RESULT_EGOGIFT_BASE_URL}
+                                          onOpenEgoGiftByName={(name) => egoGiftPreviewOpenRef.current?.(name)}
+                                          readOnly
+                                        />
+
+                                        <div className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 overflow-visible">
+                                          <div className="flex items-center justify-between gap-2 mb-4 border-b border-[#b8860b]/30 pb-3">
+                                            <h4 className="text-base md:text-lg font-semibold text-yellow-200/90">선택한 에고기프트</h4>
+                                            <div className="flex items-center gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => setShareBoardPreviewEgoGiftViewMode("floor")}
+                                                className={`px-2 py-1 rounded text-xs border transition ${shareBoardPreviewEgoGiftViewMode === "floor" ? "bg-yellow-400 text-black border-yellow-400" : "bg-[#1a1a1d] text-gray-200 border-[#b8860b]/40 hover:bg-[#232327]"}`}
+                                              >
+                                                층별 보기
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setShareBoardPreviewEgoGiftViewMode("keyword")}
+                                                className={`px-2 py-1 rounded text-xs border transition ${shareBoardPreviewEgoGiftViewMode !== "floor" ? "bg-yellow-400 text-black border-yellow-400" : "bg-[#1a1a1d] text-gray-200 border-[#b8860b]/40 hover:bg-[#232327]"}`}
+                                              >
+                                                키워드별 보기
+                                              </button>
+                                            </div>
+                                          </div>
+                                          {shareBoardPreviewEgoGifts.length === 0 ? (
+                                            <p className="text-xs text-gray-500">선택된 에고기프트가 없습니다.</p>
+                                          ) : (
+                                            <div className="space-y-4">
+                                              {shareBoardPreviewEgoGiftViewMode === "floor" ? (
+                                                <div className="space-y-4">
+                                                  {shareBoardPreviewFloorRowsForDisplay.length > 0 && (
+                                                    <div className="space-y-4">
+                                                      {shareBoardPreviewFloorRowsForDisplay.map((row) =>
+                                                        row.limitedEgoGifts.length === 0 ? (
+                                                          <div
+                                                            key={`share-floor-${row.floor}-${row.cardpackId}`}
+                                                            className="rounded-lg border border-[#b8860b]/40 bg-[#131316]/90 px-3 py-3 md:px-4 md:py-3.5"
+                                                          >
+                                                            <div className="mb-2 text-sm font-bold tabular-nums text-amber-300/95">{row.floor}층</div>
+                                                            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">카드팩 및 에고기프트</div>
+                                                            <p className="text-sm leading-relaxed text-gray-400 break-words [overflow-wrap:anywhere]">
+                                                              <span className="text-gray-300">{row.title}</span>
+                                                              <span className="text-gray-500"> — </span>
+                                                              선택한 카드팩으로 획득할 한정 에고기프트가 없습니다.
+                                                            </p>
+                                                          </div>
+                                                        ) : (
+                                                          <div
+                                                            key={`share-floor-${row.floor}-${row.cardpackId}`}
+                                                            className="min-w-0 max-w-full overflow-hidden rounded-lg border border-[#b8860b]/40 bg-[#131316]/90 p-3 md:p-4"
+                                                          >
+                                                            <div className="mb-2 text-sm font-bold tabular-nums text-amber-300/95">{row.floor}층</div>
+                                                            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">카드팩 및 에고기프트</div>
+                                                            <div className="flex min-h-[11rem] flex-col items-stretch gap-4 sm:flex-row">
+                                                              <div className="mx-auto flex w-full max-w-[10rem] shrink-0 flex-col self-stretch sm:mx-0 sm:w-[9.5rem] sm:max-w-none">
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => cardPackDetailOpenRef.current?.open(row.cardpackId)}
+                                                                  className="flex h-full min-h-0 flex-1 flex-col gap-2 rounded-lg border border-[#b8860b]/35 bg-[#1a1a1d]/90 p-2 text-left"
+                                                                  title="카드팩 상세"
+                                                                >
+                                                                  <div className="relative min-h-[9rem] w-full flex-1 basis-0 overflow-hidden rounded bg-[#0d0d10]">
+                                                                    {row.thumbnail ? (
+                                                                      <img
+                                                                        src={RESULT_EGOGIFT_BASE_URL + row.thumbnail}
+                                                                        alt={row.title}
+                                                                        className="absolute inset-0 h-full w-full object-cover"
+                                                                        onError={(e) => {
+                                                                          (e.target as HTMLImageElement).style.display = "none";
+                                                                        }}
+                                                                      />
+                                                                    ) : (
+                                                                      <span className="absolute inset-0 flex items-center justify-center px-1 text-center text-[10px] text-gray-600">
+                                                                        이미지 없음
+                                                                      </span>
+                                                                    )}
+                                                                  </div>
+                                                                  <p className="w-full shrink-0 break-words text-center text-xs font-medium leading-snug text-gray-200 sm:text-left">
+                                                                    {row.title}
+                                                                  </p>
+                                                                </button>
+                                                              </div>
+                                                              <div className="flex min-h-0 min-w-0 flex-1 flex-col self-stretch">
+                                                                <ResultKeywordSection
+                                                                  keyword={`__share_floor_lim_${row.floor}__`}
+                                                                  variant="flat"
+                                                                  omitSynthesis
+                                                                  fillParentHeight
+                                                                  egogifts={row.limitedEgoGifts}
+                                                                  keywordIndex={0}
+                                                                  resultSimplified={false}
+                                                                  keywordGiftExpandedByKeyword={shareBoardPreviewKeywordGiftExpandedByKeyword}
+                                                                  setKeywordGiftExpandedByKeyword={setShareBoardPreviewKeywordGiftExpandedByKeyword}
+                                                                  synthesisExpandedByKeyword={shareBoardPreviewSynthesisExpandedByKeyword}
+                                                                  setSynthesisExpandedByKeyword={setShareBoardPreviewSynthesisExpandedByKeyword}
+                                                                  synthesisRecipes={shareBoardPreviewSynthesisRecipes}
+                                                                  resultEgoGifts={shareBoardPreviewEgoGifts}
+                                                                  checkedEgoGiftIds={[]}
+                                                                  onToggleEgoGiftCheck={() => {}}
+                                                                  onRemoveStarredEgoGift={() => {}}
+                                                                  sectionRef={() => {}}
+                                                                  synthesisRef={() => {}}
+                                                                  onCaptureSection={() => {}}
+                                                                  egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                                                                  readOnly
+                                                                />
+                                                              </div>
+                                                            </div>
+                                                            {filterSynthesisRecipesForEgoIds(
+                                                              shareBoardPreviewSynthesisRecipes,
+                                                              row.limitedEgoGifts.map((e) => e.egogiftId),
+                                                            ).length > 0 ? (
+                                                              <div className="mt-4 min-w-0 max-w-full border-t border-[#b8860b]/30 pt-3">
+                                                                <div className="mb-2 text-xs font-semibold text-purple-300/95">조합식</div>
+                                                                <SynthesisRecipesSubsetBlock
+                                                                  sectionKey={`__share_floor_lim_syn_${row.floor}__`}
+                                                                  relevantEgoIds={row.limitedEgoGifts.map((e) => e.egogiftId)}
+                                                                  synthesisRecipes={shareBoardPreviewSynthesisRecipes}
+                                                                  resultEgoGifts={shareBoardPreviewEgoGifts}
+                                                                  resultSimplified={false}
+                                                                  synthesisExpandedByKeyword={shareBoardPreviewSynthesisExpandedByKeyword}
+                                                                  setSynthesisExpandedByKeyword={setShareBoardPreviewSynthesisExpandedByKeyword}
+                                                                  onCaptureSection={() => {}}
+                                                                  synthesisRef={() => {}}
+                                                                  egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                                                                  showHeaderRow={false}
+                                                                  layout="floor"
+                                                                />
+                                                              </div>
+                                                            ) : null}
+                                                          </div>
+                                                        )
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                  <ResultKeywordSection
+                                                    key="share-board-preview-flat"
+                                                    keyword={RESULT_EGO_FLAT_SECTION_KEY}
+                                                    egogifts={shareBoardPreviewEgoGiftsFlatExcludingFloorLimited}
+                                                    keywordIndex={0}
+                                                    resultSimplified={false}
+                                                    keywordGiftExpandedByKeyword={shareBoardPreviewKeywordGiftExpandedByKeyword}
+                                                    setKeywordGiftExpandedByKeyword={setShareBoardPreviewKeywordGiftExpandedByKeyword}
+                                                    synthesisExpandedByKeyword={shareBoardPreviewSynthesisExpandedByKeyword}
+                                                    setSynthesisExpandedByKeyword={setShareBoardPreviewSynthesisExpandedByKeyword}
+                                                    synthesisRecipes={shareBoardPreviewSynthesisRecipes}
+                                                    resultEgoGifts={shareBoardPreviewEgoGifts}
+                                                    checkedEgoGiftIds={[]}
+                                                    onToggleEgoGiftCheck={() => {}}
+                                                    onRemoveStarredEgoGift={() => {}}
+                                                    sectionRef={() => {}}
+                                                    synthesisRef={() => {}}
+                                                    onCaptureSection={() => {}}
+                                                    egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                                                    variant="flat"
+                                                    readOnly
+                                                  />
+                                                </div>
+                                              ) : (
+                                                shareBoardPreviewEgoGiftsByKeyword.map(({ keyword, egogifts }, idx) => (
+                                                  <ResultKeywordSection
+                                                    key={`share-board-preview-${keyword}`}
+                                                    keyword={keyword}
+                                                    egogifts={egogifts}
+                                                    keywordIndex={idx}
+                                                    resultSimplified={false}
+                                                    keywordGiftExpandedByKeyword={shareBoardPreviewKeywordGiftExpandedByKeyword}
+                                                    setKeywordGiftExpandedByKeyword={setShareBoardPreviewKeywordGiftExpandedByKeyword}
+                                                    synthesisExpandedByKeyword={shareBoardPreviewSynthesisExpandedByKeyword}
+                                                    setSynthesisExpandedByKeyword={setShareBoardPreviewSynthesisExpandedByKeyword}
+                                                    synthesisRecipes={shareBoardPreviewSynthesisRecipes}
+                                                    resultEgoGifts={shareBoardPreviewEgoGifts}
+                                                    checkedEgoGiftIds={[]}
+                                                    onToggleEgoGiftCheck={() => {}}
+                                                    onRemoveStarredEgoGift={() => {}}
+                                                    sectionRef={() => {}}
+                                                    synthesisRef={() => {}}
+                                                    onCaptureSection={() => {}}
+                                                    egoGiftPreviewOpenRef={egoGiftPreviewOpenRef}
+                                                    readOnly
+                                                  />
+                                                ))
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="border-t border-[#b8860b]/30 pt-4 mt-2">
+                                          <div className="mb-2 flex items-center justify-between gap-2">
+                                            <div className="text-sm font-semibold text-yellow-300">
+                                              댓글 ({shareBoardComments.filter((c) => c.deletedYn !== "Y").length})
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (shareBoardSelectedPost?.postId) {
+                                                  void fetchShareBoardComments(shareBoardSelectedPost.postId);
+                                                }
+                                              }}
+                                              className="inline-flex h-7 w-7 items-center justify-center rounded border border-[#b8860b]/40 text-gray-300 hover:bg-[#2a2a2d] hover:text-yellow-200"
+                                              title="댓글 새로고침"
+                                              aria-label="댓글 새로고침"
+                                            >
+                                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                                <path d="M21 3v6h-6" />
+                                              </svg>
+                                            </button>
+                                          </div>
+                                          <div className="space-y-3">
+                                            <div className="flex gap-2">
+                                              <input
+                                                type="text"
+                                                value={shareBoardCommentInput}
+                                                onChange={(e) => setShareBoardCommentInput(e.target.value)}
+                                                placeholder="댓글을 입력하세요"
+                                                className="flex-1 px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => submitShareBoardComment(shareBoardCommentInput)}
+                                                disabled={shareBoardCommentSubmitting}
+                                                className="px-3 py-2 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-500 disabled:opacity-50"
+                                              >
+                                                등록
+                                              </button>
+                                            </div>
+                                            {shareBoardCommentsLoading ? (
+                                              <p className="text-xs text-gray-400">댓글을 불러오는 중...</p>
+                                            ) : (
+                                              <div className="space-y-2">
+                                                {shareBoardComments.filter((c) => c.depth === 1).map((comment) => {
+                                                  const children = shareBoardComments.filter((ch) => ch.parentCommentId === comment.commentId);
+                                                  return (
+                                                    <div key={comment.commentId} className="rounded border border-[#b8860b]/25 bg-[#1a1a1d] p-3">
+                                                      <div className="text-xs text-gray-500 mb-1">
+                                                        {comment.authorNickname || "사용자"} · {comment.createdAt ? new Date(comment.createdAt).toLocaleString() : "-"}
+                                                      </div>
+                                                      <p className="text-sm text-gray-200 whitespace-pre-wrap">{comment.content}</p>
+                                                      <div className="mt-2 flex items-center gap-2 text-xs">
+                                                        {comment.deletedYn !== "Y" && (
+                                                          <button type="button" onClick={() => setShareBoardReplyParentId((prev) => (prev === comment.commentId ? null : comment.commentId))} className="text-cyan-300 hover:text-cyan-200">
+                                                            답글
+                                                          </button>
+                                                        )}
+                                                        {comment.isMine && comment.deletedYn !== "Y" && (
+                                                          <button type="button" onClick={() => deleteShareBoardComment(comment.commentId)} className="text-red-300 hover:text-red-200">
+                                                            삭제
+                                                          </button>
+                                                        )}
+                                                      </div>
+                                                      {shareBoardReplyParentId === comment.commentId && (
+                                                        <div className="mt-2 flex gap-2">
+                                                          <input
+                                                            type="text"
+                                                            value={shareBoardReplyInput}
+                                                            onChange={(e) => setShareBoardReplyInput(e.target.value)}
+                                                            placeholder="답글을 입력하세요"
+                                                            className="flex-1 px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                          />
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => submitShareBoardComment(shareBoardReplyInput, comment.commentId)}
+                                                            disabled={shareBoardCommentSubmitting}
+                                                            className="px-3 py-2 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-500 disabled:opacity-50"
+                                                          >
+                                                            등록
+                                                          </button>
+                                                        </div>
+                                                      )}
+                                                      {children.length > 0 && (
+                                                        <div className="mt-3 space-y-2">
+                                                          {children.map((child) => (
+                                                            <div key={child.commentId} className="ml-4 rounded border border-[#b8860b]/20 bg-[#151518] p-3">
+                                                              <div className="text-xs text-gray-500 mb-1">
+                                                                {child.authorNickname || "사용자"} · {child.createdAt ? new Date(child.createdAt).toLocaleString() : "-"}
+                                                              </div>
+                                                              <p className="text-sm text-gray-200 whitespace-pre-wrap">{child.content}</p>
+                                                              {child.isMine && child.deletedYn !== "Y" && (
+                                                                <button type="button" onClick={() => deleteShareBoardComment(child.commentId)} className="mt-2 text-xs text-red-300 hover:text-red-200">
+                                                                  삭제
+                                                                </button>
+                                                              )}
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {shareBoardMode === "list" && (
+                        <>
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-2">
+                              <select value={shareBoardSort} onChange={(e) => setShareBoardSort((e.target.value as "latest" | "recommend7" | "recommend15" | "recommend30") || "latest")} className="px-2 py-1.5 text-sm rounded bg-[#2a2a2d] border border-[#b8860b]/40 text-gray-200">
+                                <option value="latest">최신순</option>
+                                <option value="recommend7">추천순(7일)</option>
+                                <option value="recommend15">추천순(15일)</option>
+                                <option value="recommend30">추천순(30일)</option>
+                              </select>
+                              <select value={shareBoardSearchType} onChange={(e) => setShareBoardSearchType((e.target.value as "title" | "author") || "title")} className="px-2 py-1.5 text-sm rounded bg-[#2a2a2d] border border-[#b8860b]/40 text-gray-200">
+                                <option value="title">제목</option>
+                                <option value="author">작성자</option>
+                              </select>
+                              <button type="button" onClick={() => fetchShareBoardPosts()} className="px-3 py-1.5 text-sm rounded border border-[#b8860b]/40 text-gray-200 hover:bg-[#2a2a2d]">적용</button>
+                              <button
+                                type="button"
+                                onClick={() => setShareBoardPopularOnly((prev) => !prev)}
+                                className={`px-3 py-1.5 text-sm rounded border transition-colors ${shareBoardPopularOnly ? "border-yellow-400/70 bg-yellow-500/20 text-yellow-200" : "border-[#b8860b]/40 text-gray-200 hover:bg-[#2a2a2d]"}`}
+                                title="추천 10개 이상 게시글만 보기"
+                              >
+                                추천글
+                              </button>
+                            </div>
+                          </div>
+                          <input type="text" value={shareBoardSearchText} onChange={(e) => setShareBoardSearchText(e.target.value)} placeholder={shareBoardSearchType === "author" ? "작성자 검색" : "제목 검색"} className="w-full px-3 py-2 mb-3 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                          {shareBoardLoading ? (
+                            <p className="text-sm text-gray-400">목록을 불러오는 중...</p>
+                          ) : filteredShareBoardPosts.length === 0 ? (
+                            <p className="text-sm text-gray-400">등록된 게시글이 없습니다.</p>
+                          ) : (
+                            <>
+                              <div className="space-y-2">
+                                {filteredShareBoardPosts.map((post) => (
+                                  <button key={post.postId} type="button" onClick={() => handleShareBoardOpenPost(post.postId)} className="w-full text-left bg-[#1a1a1d] border border-[#b8860b]/30 rounded p-3 hover:bg-[#232327] transition-colors">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="font-medium text-yellow-200 truncate">{post.title}</div>
+                                      <div className="text-xs text-yellow-300 shrink-0">추천 {post.recommendCount ?? 0}</div>
+                                    </div>
+                                    {post.description && (
+                                      <p className="text-sm text-gray-300 mt-1">
+                                        {post.description.length > 30 ? `${post.description.slice(0, 30)}...` : post.description}
+                                      </p>
+                                    )}
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      작성자: {post.authorNickname || "사용자"} · 댓글 {post.commentCount ?? 0} · {post.createdAt ? new Date(post.createdAt).toLocaleString() : "-"}
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="mt-3 flex items-center justify-between gap-2 text-sm">
+                                <div className="text-gray-400">총 {shareBoardTotalCount}개 · {shareBoardPage}/{shareBoardTotalPages} 페이지</div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShareBoardPage((p) => Math.max(1, p - 1))}
+                                    disabled={shareBoardPage <= 1}
+                                    className="px-2.5 py-1.5 rounded border border-[#b8860b]/40 text-gray-200 hover:bg-[#2a2a2d] disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    이전
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShareBoardPage((p) => Math.min(shareBoardTotalPages, p + 1))}
+                                    disabled={shareBoardPage >= shareBoardTotalPages}
+                                    className="px-2.5 py-1.5 rounded border border-[#b8860b]/40 text-gray-200 hover:bg-[#2a2a2d] disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    다음
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col lg:flex-row gap-6">
               <div className="w-full lg:w-1/5 flex-shrink-0 order-1 lg:order-1 min-w-[240px]">
@@ -3693,29 +5216,36 @@ export default function FavoritesPage() {
                   </div>
                 )}
               </div>
-              {/* 결과 탭에서 에고기프트/카드팩 클릭 시 상세 모달을 열기 위해 숨겨서 마운트 */}
-              {activeTab === "result" && (
-                <div className="hidden" aria-hidden="true">
-                  <EgoGiftPageContent
-                    slotAboveSearch={null}
-                    embedded
-                    starredEgoGiftIds={starredEgoGiftIds}
-                    onStarClick={handleStarToggle}
-                    openEgoGiftPreviewRef={egoGiftPreviewOpenRef}
-                  />
-                  <CardPackPageContent
-                    slotAboveSearch={null}
-                    embedded
-                    starredCardPackIds={starredCardPackIds}
-                    onStarClick={handleCardPackStarToggle}
-                    openCardPackDetailRef={cardPackDetailOpenRef}
-                  />
-                </div>
-              )}
             </div>
           )}
+          {/* 에고기프트/카드팩 상세 모달 오픈 ref를 항상 유지하기 위해 백그라운드 상시 마운트 */}
+          <div className="pointer-events-none absolute -left-[99999px] top-0 h-px w-px overflow-hidden" aria-hidden="true">
+            <EgoGiftPageContent
+              slotAboveSearch={null}
+              embedded
+              starredEgoGiftIds={starredEgoGiftIds}
+              onStarClick={handleStarToggle}
+              openEgoGiftPreviewRef={egoGiftPreviewOpenRef}
+              enableSynthesisMaterialsPrefetch
+            />
+            <CardPackPageContent
+              slotAboveSearch={null}
+              embedded
+              starredCardPackIds={starredCardPackIds}
+              onStarClick={handleCardPackStarToggle}
+              openCardPackDetailRef={cardPackDetailOpenRef}
+            />
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function FavoritesPage() {
+  return (
+    <Suspense fallback={null}>
+      <FavoritesPageClient />
+    </Suspense>
   );
 }
