@@ -836,6 +836,9 @@ function EventPageContent() {
       {isMounted && previewOpen && previewEvent && createPortal(
         <div 
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="event-page-preview-title"
           onClick={closeEventModal}
         >
           <div 
@@ -844,11 +847,11 @@ function EventPageContent() {
           >
             <div 
               ref={modalScrollRef}
-              className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative"
+              className="flex-1 overflow-y-auto relative"
             >
               <div className="sticky top-0 bg-[#131316] border-b border-[#b8860b]/40 px-4 sm:px-6 py-4 z-50 flex justify-between items-center backdrop-blur-sm">
                 <div className="flex-1 flex items-center gap-3 flex-wrap">
-                  <h2 className="text-lg sm:text-xl font-bold text-yellow-300">{previewEvent.title}</h2>
+                  <h2 id="event-page-preview-title" className="text-lg sm:text-xl font-bold text-yellow-300">{previewEvent.title}</h2>
                   {previewEvent.cardpackTitles && previewEvent.cardpackTitles.length > 0 && (
                     <div className="text-sm" style={{ color: '#ccff00' }}>
                       {previewEvent.cardpackTitles.map((title, idx) => (

@@ -63,16 +63,19 @@ export default function Footer() {
       {isMounted && isModalOpen && createPortal(
         <div 
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="privacy-policy-modal-title"
           onClick={() => setIsModalOpen(false)}
         >
           <div 
             className="bg-[#131316] border border-[#b8860b]/60 rounded-lg max-w-4xl w-full mx-4 h-[90vh] flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative">
+            <div className="flex-1 overflow-y-auto relative">
               <div className="sticky top-0 bg-[#131316] border-b border-[#b8860b]/40 px-4 sm:px-6 py-4 z-50 flex justify-between items-center backdrop-blur-sm">
                 <div>
-                  <h2 className="text-lg sm:text-xl font-bold text-yellow-300">
+                  <h2 id="privacy-policy-modal-title" className="text-lg sm:text-xl font-bold text-yellow-300">
                     {language === "ko" ? "개인정보처리방침" : "Privacy Policy"}
                   </h2>
                 </div>

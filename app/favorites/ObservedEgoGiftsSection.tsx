@@ -14,6 +14,8 @@ export type ObservableEgoCatalogItem = {
   /** 합성전용(Y) = 조합식 결과 에고기프트 */
   synthesisYn?: string;
   thumbnail?: string;
+  /** 한정 카테고리에 매핑된 카드팩 제목 등 — 비어 있으면 한정 카드팩 출현 아님 */
+  limitedCategoryNames?: string[];
 };
 
 /** 관측 후보: Ⅳ(4)·EX 등급·합성/조합 산출물 제외 (synthesisYn·조합식 결과 ID 모두 반영) */
@@ -47,9 +49,22 @@ type Props = {
   imageBaseUrl: string;
   onOpenEgoGiftByName: (giftName: string) => void;
   readOnly?: boolean;
+  sectionTitle?: string;
+  addLabel?: string;
+  maxCount?: number;
+  searchInputId?: string;
+  fixedKeywordOptions?: string[];
+  hideAllKeywordOption?: boolean;
+  allowedIdsByKeyword?: Partial<Record<string, number[]>>;
+  hideSearchInput?: boolean;
+  /**
+   * 결과 탭 에고기프트 「간소화」와 동일한 의미:
+   * - true: 이름·키워드·합성 여부 등 텍스트 위주 카드, 조밀 그리드 (프레임 이미지 없음)
+   * - false: 프레임·썸네일·키워드 아이콘·상세 텍스트 블록 (결과 탭 상세 보기와 동일 구조)
+   */
+  compact?: boolean;
+  className?: string;
 };
-
-const MAX_OBSERVED = 3;
 
 /** 관측 키워드 필터 버튼 순서 (그 외 키워드는 뒤에 가나다순) */
 const OBSERVED_KEYWORD_BUTTON_ORDER: readonly string[] = [
@@ -94,19 +109,33 @@ function resultCardDifficultyClass(grades: string[] | undefined): string {
   return "result-egogift-card--normal";
 }
 
+function isSynthesisOnlyFlag(synthesisYn: string | undefined): boolean {
+  return String(synthesisYn ?? "").trim().toUpperCase() === "Y";
+}
+
+/** 결과 탭과 동일: 한정 카드팩 카테고리가 있을 때만 「카드팩 한정」 정보 표시 */
+function limitedCategoryDisplayNames(names: string[] | undefined): string[] {
+  if (!names?.length) return [];
+  return names.map((n) => String(n).trim()).filter(Boolean);
+}
+
 function ObservedEgoGiftFrame({
   g,
   imageBaseUrl,
   size,
+  showKeywordIcon = true,
 }: {
   g: ObservableEgoCatalogItem;
   imageBaseUrl: string;
-  size: "compact" | "card";
+  size: "compact" | "card" | "cardCompact";
+  /** 키워드 아이콘 표시 여부 */
+  showKeywordIcon?: boolean;
 }) {
   const kw = (g.keywordName || "").trim();
   const keywordIcon = kw ? RESULT_KEYWORD_ICON_MAP[kw] : null;
   const tierLabel = formatEgoGiftTierDisplay(g.giftTier);
-  const isCard = size === "card";
+  const isCard = size === "card" || size === "cardCompact";
+  const isCardCompact = size === "cardCompact";
   return (
     <div className={`relative shrink-0 ${isCard ? "aspect-square w-full mb-2" : "aspect-square w-14 h-14"}`}>
       <img
@@ -116,15 +145,23 @@ function ObservedEgoGiftFrame({
       />
       <div
         className={`result-egogift-tier absolute z-20 select-none font-black leading-none tracking-tight text-amber-100/95 drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)] ${
-          isCard ? "top-1 -left-3 text-5xl scale-x-[0.65]" : "top-0.5 -left-1.5 text-2xl scale-x-[0.72]"
+          isCardCompact
+            ? "top-0.5 -left-2 text-2xl scale-x-[0.65] sm:text-3xl"
+            : isCard
+              ? "top-0.5 -left-1.5 text-2xl scale-x-[0.65] sm:top-1 sm:-left-2 sm:text-3xl md:-left-3 md:text-4xl lg:text-5xl"
+              : "top-0.5 -left-1.5 text-2xl scale-x-[0.72]"
         }`}
       >
         {tierLabel}
       </div>
-      {keywordIcon && kw ? (
+      {showKeywordIcon && keywordIcon && kw ? (
         <div
           className={`absolute z-20 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)] ${
-            isCard ? "bottom-[5px] right-0 h-9 w-9" : "bottom-0.5 right-0 h-6 w-6"
+            isCardCompact
+              ? "bottom-0.5 right-0 h-5 w-5 sm:h-6 sm:w-6"
+              : isCard
+                ? "bottom-0.5 right-0 h-6 w-6 sm:bottom-[5px] sm:h-7 sm:w-7 md:h-8 md:w-8 lg:h-9 lg:w-9"
+                : "bottom-0.5 right-0 h-6 w-6"
           }`}
         >
           <img src={keywordIcon} alt={kw} className="h-full w-full object-contain" />
@@ -156,6 +193,17 @@ export function ObservedEgoGiftsSection({
   imageBaseUrl,
   onOpenEgoGiftByName,
   readOnly = false,
+  sectionTitle = "관측 에고기프트",
+  addLabel = "에고기프트 추가",
+  maxCount = 3,
+  searchInputId = "observed-egogift-search",
+  fixedKeywordOptions,
+  hideAllKeywordOption = false,
+  allowedIdsByKeyword,
+  hideSearchInput = false,
+  /** 기본: 결과 탭과 동일하게 간소화(텍스트 카드) */
+  compact = true,
+  className = "",
 }: Props) {
   const [pickQuery, setPickQuery] = useState("");
   /** null = 전체 키워드 */
@@ -170,6 +218,9 @@ export function ObservedEgoGiftsSection({
   const chosenSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const keywordOptions = useMemo(() => {
+    if (Array.isArray(fixedKeywordOptions) && fixedKeywordOptions.length > 0) {
+      return fixedKeywordOptions.map((k) => String(k).trim()).filter(Boolean);
+    }
     const s = new Set<string>();
     for (const g of catalog) {
       const k = (g.keywordName || "").trim();
@@ -181,13 +232,24 @@ export function ObservedEgoGiftsSection({
       if (ka !== kb) return ka - kb;
       return a.localeCompare(b, "ko");
     });
-  }, [catalog]);
+  }, [catalog, fixedKeywordOptions]);
 
   useEffect(() => {
+    const hasFixedOptions = Array.isArray(fixedKeywordOptions) && fixedKeywordOptions.length > 0;
+    if (hasFixedOptions && hideAllKeywordOption) {
+      if (keywordOptions.length === 0) {
+        if (keywordFilter !== null) setKeywordFilter(null);
+        return;
+      }
+      if (keywordFilter == null || !keywordOptions.includes(keywordFilter)) {
+        setKeywordFilter(keywordOptions[0]);
+      }
+      return;
+    }
     if (keywordFilter != null && !keywordOptions.includes(keywordFilter)) {
       setKeywordFilter(null);
     }
-  }, [keywordFilter, keywordOptions]);
+  }, [keywordFilter, keywordOptions, fixedKeywordOptions, hideAllKeywordOption]);
 
   const sortedSelectedIds = useMemo(() => {
     return [...selectedIds].sort((a, b) => {
@@ -205,13 +267,19 @@ export function ObservedEgoGiftsSection({
     const rows = catalog
       .filter((g) => !chosenSet.has(g.egogiftId))
       .filter((g) => keywordFilter == null || (g.keywordName || "").trim() === keywordFilter)
+      .filter((g) => {
+        if (keywordFilter == null) return true;
+        const allowed = allowedIdsByKeyword?.[keywordFilter];
+        if (!allowed || allowed.length === 0) return true;
+        return allowed.includes(g.egogiftId);
+      })
       .filter((g) => !q || g.giftName.toLowerCase().includes(q));
     rows.sort(compareObservableByTierDescThenName);
     return rows;
-  }, [catalog, chosenSet, pickQuery, keywordFilter]);
+  }, [catalog, chosenSet, pickQuery, keywordFilter, allowedIdsByKeyword]);
 
   const addId = (id: number) => {
-    if (selectedIds.length >= MAX_OBSERVED) return;
+    if (selectedIds.length >= maxCount) return;
     if (chosenSet.has(id)) return;
     onChange([...selectedIds, id]);
     setPickQuery("");
@@ -222,81 +290,161 @@ export function ObservedEgoGiftsSection({
   };
 
   return (
-    <div className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 mb-4">
-      <div className="border-b border-[#b8860b]/40 pb-3 mb-4">
-        <h3 className="text-base md:text-lg font-semibold text-yellow-200/90">관측 에고기프트</h3>
+    <div
+      className={`bg-[#131316] border border-[#b8860b]/40 rounded-lg ${compact ? "p-2 sm:p-2.5 mb-0" : "p-3 md:p-4 mb-4"} ${className}`.trim()}
+    >
+      <div className={`border-b border-[#b8860b]/40 ${compact ? "pb-2 mb-2" : "pb-2.5 mb-3"}`}>
+        <h3 className="text-lg font-semibold text-yellow-300">{sectionTitle}</h3>
       </div>
 
       {selectedIds.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-3">
+        <div
+          className={
+            compact
+              ? "mb-2 grid grid-cols-3 gap-1.5 sm:gap-2 md:gap-3"
+              : "mb-3 grid grid-cols-3 gap-2 sm:gap-3 md:gap-4"
+          }
+        >
           {sortedSelectedIds.map((id) => {
             const g = byId.get(id);
             const row = g ?? { egogiftId: id, giftName: `ID ${id}`, keywordName: "" };
             const diffClass = resultCardDifficultyClass(g?.grades);
+            const limitedNames = limitedCategoryDisplayNames(row.limitedCategoryNames);
+
+            if (compact) {
+              return (
+                <div
+                  key={id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => (g ? onOpenEgoGiftByName(g.giftName) : undefined)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      if (g) onOpenEgoGiftByName(g.giftName);
+                    }
+                  }}
+                  className={`group relative min-w-0 cursor-pointer rounded-lg p-2 text-left shadow-sm outline-none transition-[box-shadow,filter] hover:ring-1 hover:ring-yellow-400/40 focus-visible:ring-2 focus-visible:ring-yellow-400/60 sm:p-3 ${diffClass}`}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeId(id);
+                    }}
+                    className="absolute -right-1 -top-1 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-red-400/60 bg-[#1a0a0a] text-xs font-bold text-red-200 hover:bg-red-950/90"
+                    title="등록 해제"
+                    aria-label="등록 해제"
+                    hidden={readOnly}
+                  >
+                    ×
+                  </button>
+                  <div className="relative z-0 flex min-w-0 flex-col gap-1">
+                    <div className="flex flex-wrap items-baseline gap-1 sm:gap-1.5">
+                      <span className="result-egogift-tier shrink-0 text-xs font-bold text-amber-400/90 sm:text-sm">
+                        {formatEgoGiftTierDisplay(row.giftTier)}
+                      </span>
+                      <span className="result-egogift-name min-w-0 break-words text-xs font-medium leading-tight text-gray-200 sm:text-sm">
+                        {row.giftName}
+                      </span>
+                    </div>
+                    {limitedNames.length > 0 ? (
+                      <div className="break-words text-[10px] leading-tight text-gray-400 sm:text-xs">
+                        {limitedNames.map((n) => `"${n}"`).join(", ")}
+                      </div>
+                    ) : null}
+                    {isSynthesisOnlyFlag(row.synthesisYn) ? (
+                      <div className="text-[10px] text-purple-300 sm:text-xs">합성전용</div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div
                 key={id}
-                className={`group relative flex w-[9.5rem] flex-col rounded p-3 shadow-sm outline-none transition-all hover:ring-1 hover:ring-yellow-400/40 focus-within:ring-1 focus-within:ring-yellow-400/50 ${diffClass}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => (g ? onOpenEgoGiftByName(g.giftName) : undefined)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    if (g) onOpenEgoGiftByName(g.giftName);
+                  }
+                }}
+                className={`group relative flex min-h-0 cursor-pointer flex-col rounded p-1.5 outline-none transition-all hover:ring-1 hover:ring-yellow-400/40 focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] sm:p-2 md:p-3 ${diffClass}`}
               >
                 <button
                   type="button"
-                  onClick={() => removeId(id)}
-                  className="absolute -right-1.5 -top-1.5 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-red-400/60 bg-[#1a0a0a] text-red-200 text-xs font-bold hover:bg-red-950/90"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeId(id);
+                  }}
+                  className="absolute -right-1 -top-1 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-red-400/60 bg-[#1a0a0a] text-xs font-bold text-red-200 hover:bg-red-950/90"
                   title="등록 해제"
                   aria-label="등록 해제"
                   hidden={readOnly}
                 >
                   ×
                 </button>
-                <button
-                  type="button"
-                  onClick={() => (g ? onOpenEgoGiftByName(g.giftName) : undefined)}
-                  className="flex min-h-0 flex-col text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/50 rounded"
-                  disabled={!g}
-                  title={g ? "상세 보기" : undefined}
-                >
-                  <ObservedEgoGiftFrame g={row} imageBaseUrl={imageBaseUrl} size="card" />
-                  <div className="result-egogift-card-text min-h-0 flex-1 text-center text-[11px] font-medium leading-tight text-gray-300">
-                    <div className="result-egogift-name line-clamp-2 break-words">{row.giftName}</div>
-                  </div>
-                </button>
+                <ObservedEgoGiftFrame g={row} imageBaseUrl={imageBaseUrl} size="card" showKeywordIcon />
+                <div className="result-egogift-card-text flex-1 text-center text-[10px] font-medium leading-snug text-gray-300 sm:text-xs md:text-sm lg:text-base">
+                  <div className="result-egogift-name break-words leading-tight">{row.giftName}</div>
+                  {isSynthesisOnlyFlag(row.synthesisYn) ? (
+                    <div className="result-egogift-label break-words text-[9px] text-purple-300 sm:text-[10px] md:text-xs">
+                      합성전용
+                    </div>
+                  ) : null}
+                  {limitedNames.length > 0 ? (
+                    <div className="result-egogift-label break-words text-[9px] leading-tight text-yellow-200/90 sm:text-[10px] md:text-xs">
+                      {limitedNames.map((n) => `"${n}"`).join(", ")} 카드팩 한정
+                    </div>
+                  ) : null}
+                </div>
               </div>
             );
           })}
         </div>
       )}
 
-      {!readOnly && selectedIds.length < MAX_OBSERVED && (
-        <div className="rounded-lg border border-[#b8860b]/25 bg-[#0d0d0f]/60 p-3">
-          <label htmlFor="observed-egogift-search" className="mb-2 block text-xs font-medium text-gray-400">
-            에고기프트 추가 ({selectedIds.length}/{MAX_OBSERVED})
-            {!catalogLoading && catalog.length > 0 ? (
-              <span className="mt-0.5 block font-normal text-gray-500">
+      {!readOnly && selectedIds.length < maxCount && (
+        <div className={`rounded-lg border border-[#b8860b]/25 bg-[#0d0d0f]/60 ${compact ? "p-2" : "p-3"}`}>
+          <label htmlFor={searchInputId} className={`mb-2 block font-medium text-gray-400 ${compact ? "text-[10px]" : "text-xs"}`}>
+            {addLabel} ({selectedIds.length}/{maxCount})
+            {!hideSearchInput && !catalogLoading && catalog.length > 0 ? (
+              <span className={`mt-0.5 block font-normal text-gray-500 ${compact ? "text-[10px] leading-snug" : ""}`}>
                 등급 높은 순(역순) 정렬 · 키워드는 버튼 · 제목만 검색
               </span>
             ) : null}
           </label>
           {!catalogLoading && catalog.length > 0 && (
-            <div className="mb-3" role="group" aria-label="키워드 필터">
-              <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">키워드</p>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setKeywordFilter(null)}
-                  className={`rounded border px-2 py-1 text-xs transition-colors ${
-                    keywordFilter === null
-                      ? "border-amber-400/70 bg-amber-500/20 text-amber-100"
-                      : "border-[#b8860b]/35 bg-[#131316] text-gray-400 hover:border-amber-400/40 hover:text-gray-200"
-                  }`}
-                >
-                  전체
-                </button>
+            <div className={compact ? "mb-2" : "mb-3"} role="group" aria-label="키워드 필터">
+              <p className={`font-medium uppercase tracking-wide text-gray-500 ${compact ? "mb-1 text-[9px]" : "mb-1.5 text-[10px]"}`}>키워드</p>
+              <div className={`flex flex-wrap ${compact ? "gap-1" : "gap-1.5"}`}>
+                {!hideAllKeywordOption && (
+                  <button
+                    type="button"
+                    onClick={() => setKeywordFilter(null)}
+                    className={`rounded border transition-colors ${compact ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs"} ${
+                      keywordFilter === null
+                        ? "border-amber-400/70 bg-amber-500/20 text-amber-100"
+                        : "border-[#b8860b]/35 bg-[#131316] text-gray-400 hover:border-amber-400/40 hover:text-gray-200"
+                    }`}
+                  >
+                    전체
+                  </button>
+                )}
                 {keywordOptions.map((kw) => (
                   <button
                     key={kw}
                     type="button"
-                    onClick={() => setKeywordFilter((prev) => (prev === kw ? null : kw))}
-                    className={`rounded border px-2 py-1 text-xs transition-colors ${
+                    onClick={() =>
+                      setKeywordFilter((prev) =>
+                        hideAllKeywordOption ? kw : prev === kw ? null : kw
+                      )
+                    }
+                    className={`rounded border transition-colors ${compact ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs"} ${
                       keywordFilter === kw
                         ? "border-amber-400/70 bg-amber-500/20 text-amber-100"
                         : "border-[#b8860b]/35 bg-[#131316] text-gray-400 hover:border-amber-400/40 hover:text-gray-200"
@@ -308,23 +456,25 @@ export function ObservedEgoGiftsSection({
               </div>
             </div>
           )}
-          <input
-            id="observed-egogift-search"
-            type="search"
-            value={pickQuery}
-            onChange={(e) => setPickQuery(e.target.value)}
-            placeholder="제목(이름) 검색…"
-            disabled={catalogLoading || catalog.length === 0}
-            className="mb-2 w-full rounded border border-[#b8860b]/35 bg-[#0d0d0f] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-600 focus:border-yellow-400/50 focus:outline-none focus:ring-2 focus:ring-yellow-400/40 disabled:opacity-50"
-          />
+          {!hideSearchInput && (
+            <input
+              id={searchInputId}
+              type="search"
+              value={pickQuery}
+              onChange={(e) => setPickQuery(e.target.value)}
+              placeholder="제목(이름) 검색…"
+              disabled={catalogLoading || catalog.length === 0}
+              className={`mb-2 w-full rounded border border-[#b8860b]/35 bg-[#0d0d0f] text-gray-200 placeholder:text-gray-600 focus:border-yellow-400/50 focus:outline-none focus:ring-2 focus:ring-yellow-400/40 disabled:opacity-50 ${compact ? "px-2 py-1.5 text-xs" : "px-3 py-2 text-sm"}`}
+            />
+          )}
           {catalogLoading ? (
-            <p className="text-gray-500 text-sm py-2">목록 불러오는 중…</p>
+            <p className={`text-gray-500 py-2 ${compact ? "text-xs" : "text-sm"}`}>목록 불러오는 중…</p>
           ) : catalog.length === 0 ? (
-            <p className="text-gray-500 text-sm py-2">등록 가능한 에고기프트를 불러오지 못했습니다.</p>
+            <p className={`text-gray-500 py-2 ${compact ? "text-xs" : "text-sm"}`}>등록 가능한 에고기프트를 불러오지 못했습니다.</p>
           ) : pickList.length === 0 ? (
-            <p className="text-gray-500 text-sm py-2">검색 결과가 없거나 이미 모두 등록되었습니다.</p>
+            <p className={`text-gray-500 py-2 ${compact ? "text-xs" : "text-sm"}`}>검색 결과가 없거나 이미 모두 등록되었습니다.</p>
           ) : (
-            <ul className="max-h-72 space-y-2 overflow-y-auto pr-1 text-sm">
+            <ul className={`overflow-y-auto pr-1 ${compact ? "max-h-40 space-y-1 text-xs" : "max-h-72 space-y-2 text-sm"}`}>
               {pickList.map((g) => (
                 <li key={g.egogiftId}>
                   <button
@@ -335,7 +485,7 @@ export function ObservedEgoGiftsSection({
                     <ObservedEgoGiftFrame g={g} imageBaseUrl={imageBaseUrl} size="compact" />
                     <span className="flex min-w-0 flex-1 flex-col justify-center py-0.5">
                       <span className="font-medium leading-snug text-gray-200 break-words">{g.giftName}</span>
-                      {g.keywordName ? (
+                      {!compact && g.keywordName ? (
                         <span className="truncate text-xs text-gray-500">{g.keywordName}</span>
                       ) : null}
                     </span>

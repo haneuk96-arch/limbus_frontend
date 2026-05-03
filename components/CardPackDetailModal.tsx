@@ -467,6 +467,9 @@ export default function CardPackDetailModal({
         <div
           className="fixed inset-0 flex items-center justify-center bg-black/70"
           style={{ zIndex: zPack }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cardpack-detail-modal-title"
           onClick={handleClose}
         >
           <div
@@ -479,9 +482,9 @@ export default function CardPackDetailModal({
               </div>
             ) : cardPackDetail ? (
               <>
-                <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative">
+                <div className="flex-1 overflow-y-auto relative">
                   <div className="sticky top-0 bg-[#131316] border-b border-[#b8860b]/40 px-4 sm:px-6 py-4 z-50 flex justify-between items-center backdrop-blur-sm">
-                    <h2 className="text-lg sm:text-xl font-bold text-yellow-300">{cardPackDetail.title}</h2>
+                    <h2 id="cardpack-detail-modal-title" className="text-lg sm:text-xl font-bold text-yellow-300">{cardPackDetail.title}</h2>
                     <button
                       type="button"
                       onClick={handleClose}
@@ -839,6 +842,9 @@ export default function CardPackDetailModal({
           <div
             className="fixed inset-0 flex items-center justify-center bg-black/50"
             style={{ zIndex: zEvent }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cardpack-event-modal-title"
             onClick={closeEventModal}
           >
             <div
@@ -847,11 +853,11 @@ export default function CardPackDetailModal({
             >
               <div
                 ref={modalScrollRef}
-                className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative"
+                className="flex-1 overflow-y-auto relative"
               >
                 <div className="sticky top-0 bg-[#131316] border-b border-[#b8860b]/40 px-4 sm:px-6 py-4 z-50 flex justify-between items-center backdrop-blur-sm">
                   <div>
-                    <h2 className="text-lg sm:text-xl font-bold text-yellow-300">{eventTitle}</h2>
+                    <h2 id="cardpack-event-modal-title" className="text-lg sm:text-xl font-bold text-yellow-300">{eventTitle}</h2>
                   </div>
                   <button
                     type="button"

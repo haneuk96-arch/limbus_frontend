@@ -103,12 +103,13 @@ export const keywordIconMap: Record<string, string> = {
  * 키워드 색상 매핑
  */
 export const keywordColorMap: Record<string, string> = {
+  /** 순서: 빨강 → 주황 → 노랑 → 초록 → 하늘 → 남색 → 보라 */
   화상: "text-red-400",
-  출혈: "text-red-500",
+  출혈: "text-orange-400",
   진동: "text-yellow-400",
-  파열: "text-orange-400",
-  침잠: "text-blue-400",
-  호흡: "text-green-400",
+  파열: "text-green-400",
+  침잠: "text-sky-400",
+  호흡: "text-blue-600",
   충전: "text-purple-400",
   참격: "text-cyan-400",
   관통: "text-pink-400",

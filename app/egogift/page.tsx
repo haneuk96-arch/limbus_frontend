@@ -113,6 +113,8 @@ export interface EgoGiftPageContentProps {
   openEgoGiftPreviewRef?: React.MutableRefObject<((giftName: string) => void) | null>;
   /** true일 때만 합성재료 배치 프리로드 수행 (던전보고서 전용) */
   enableSynthesisMaterialsPrefetch?: boolean;
+  /** 던전보고서 에고 선택 모달: 오른쪽 결과 영역 높이를 검색조건 패널 높이에 맞추고 목록만 스크롤 */
+  embeddedModalLayout?: boolean;
 }
 
 /** 해시태그 드롭다운 패널 내용 (인라인/포탈 공용) */
@@ -344,6 +346,7 @@ export function EgoGiftPageContent({
   onStarClick,
   openEgoGiftPreviewRef,
   enableSynthesisMaterialsPrefetch = false,
+  embeddedModalLayout = false,
 }: EgoGiftPageContentProps) {
   // 에고기프트 관련 상태
   const [allEgoGiftsFull, setAllEgoGiftsFull] = useState<EgoGift[]>([]);  // 전체 목록 (필터링 전)
@@ -378,6 +381,8 @@ export function EgoGiftPageContent({
   const [limitedCardPacksLoading, setLimitedCardPacksLoading] = useState(false);
   const [limitedCardPacks, setLimitedCardPacks] = useState<LimitedCardPackItem[]>([]);
   const [selectedLimitedCardPackIds, setSelectedLimitedCardPackIds] = useState<number[]>([]);
+  const selectedLimitedCardPackIdsRef = useRef<number[]>([]);
+  selectedLimitedCardPackIdsRef.current = selectedLimitedCardPackIds;
   const [selectedLimitedCardPackEgogiftIdMap, setSelectedLimitedCardPackEgogiftIdMap] = useState<Record<number, number[]>>({});
   const limitedCardPackEgogiftCacheRef = useRef<Record<number, number[]>>({});
   const limitedCardPackEgogiftInFlightRef = useRef<Set<number>>(new Set());
@@ -388,7 +393,15 @@ export function EgoGiftPageContent({
   const [selectedGiftTiers, setSelectedGiftTiers] = useState<string[]>([]);
   const [keywordCategories, setKeywordCategories] = useState<Array<{ categoryId: number | null; categoryName: string; keywordId: number; keywordName: string }>>([]);
   const [searchConditionsCollapsed, setSearchConditionsCollapsed] = useState(false); // 모바일에서 검색 조건 접기/펼치기
-  
+  /** 던전보고서 에고 모달: md 미만(검색조건·목록 세로 배치) 여부 — 이때만 접기 버튼 활성 */
+  const [modalStackedViewport, setModalStackedViewport] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches
+  );
+  /** 세로 배치에서 최초 1회 검색조건 접어 두어 목록 영역 확보 */
+  const modalStackedInitialCollapseDoneRef = useRef(false);
+  /** 던전보고서 에고 선택 모달: 보고서에 별(선택)된 항목만 목록에 표시 */
+  const [showOnlySelectedEgoGifts, setShowOnlySelectedEgoGifts] = useState(false);
+
   // 즐겨찾기 관련 상태
   const [favorites, setFavorites] = useState<Array<{ favoriteId: number; searchJson: string; createdAt: string }>>([]);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
@@ -476,6 +489,24 @@ export function EgoGiftPageContent({
     return grouped;
   }, [filteredLimitedCardPacks]);
 
+  /** 한정 카테고리 에고 ID 집합이 바뀔 때만 for-limited-starred 재조회 (allEgoGiftsFull 참조만 바뀌면 스킵) */
+  const limitedCategoryEgoIdSignature = useMemo(() => {
+    const ids = allEgoGiftsFull
+      .filter((eg) => Array.isArray(eg.limitedCategoryNames) && eg.limitedCategoryNames.length > 0)
+      .map((eg) => eg.egogiftId)
+      .sort((a, b) => a - b);
+    return ids.join(",");
+  }, [allEgoGiftsFull]);
+
+  /** 한정 카드팩 카탈로그 ID 서명 — 일괄 preload effect가 배열 참조만 바뀔 때 재실행되지 않도록 */
+  const limitedCardPackCatalogIdsKey = useMemo(() => {
+    if (limitedCardPacks.length === 0) return "";
+    return [...new Set(limitedCardPacks.map((p) => p.cardpackId))]
+      .filter((id) => !Number.isNaN(id) && id > 0)
+      .sort((a, b) => a - b)
+      .join(",");
+  }, [limitedCardPacks]);
+
   // 카테고리 코드를 표시 이름으로 변환하는 함수
   const getCategoryDisplayName = (code: string): string => {
     const category = HASHTAG_CATEGORIES.find((cat) => cat.code === code);
@@ -549,7 +580,9 @@ export function EgoGiftPageContent({
     return () => {
       cancelled = true;
     };
-  }, [allEgoGiftsFull]);
+    // limitedCategoryEgoIdSignature만 구독 — allEgoGiftsFull 참조만 바뀌면 effect 비실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- allEgoGiftsFull는 시그니처와 동기 갱신
+  }, [limitedCategoryEgoIdSignature]);
 
   // 선택한 한정 카드팩에 포함된 "한정 에고기프트" ID 목록 조회
   useEffect(() => {
@@ -598,11 +631,13 @@ export function EgoGiftPageContent({
     };
   }, [selectedLimitedCardPackIds]);
 
-  // 한정 카드팩 상세(하위 한정 에고기프트 ID)를 초기 1회 일괄 preload
+  // 한정 카드팩 상세(하위 한정 에고기프트 ID) 일괄 preload — 카탈로그 ID 집합이 바뀔 때만 1회 분기
+  /** 보고서 에고 모달(embeddedModalLayout): 선택된 카드팩만 위 별도 effect에서 조회 → 여기서 전 카드팩 일괄 호출 생략 */
   useEffect(() => {
-    if (limitedCardPacks.length === 0) return;
+    if (embeddedModalLayout) return;
+    if (!limitedCardPackCatalogIdsKey) return;
 
-    const allCardPackIds = Array.from(new Set(limitedCardPacks.map((pack) => pack.cardpackId)));
+    const allCardPackIds = limitedCardPackCatalogIdsKey.split(",").map(Number).filter((id) => id > 0);
     const missingIds = allCardPackIds.filter(
       (cardpackId) =>
         limitedCardPackEgogiftCacheRef.current[cardpackId] == null &&
@@ -624,21 +659,21 @@ export function EgoGiftPageContent({
           limitedCardPackEgogiftInFlightRef.current.delete(row.cardpackId);
         });
 
-        // preload 완료 후 현재 선택 상태 맵을 캐시 기준으로 즉시 동기화
-        if (selectedLimitedCardPackIds.length > 0) {
+        const sel = selectedLimitedCardPackIdsRef.current;
+        if (sel.length > 0) {
           const nextMap: Record<number, number[]> = {};
-          selectedLimitedCardPackIds.forEach((cardpackId) => {
+          sel.forEach((cardpackId) => {
             nextMap[cardpackId] = limitedCardPackEgogiftCacheRef.current[cardpackId] || [];
           });
           setSelectedLimitedCardPackEgogiftIdMap(nextMap);
         }
       });
 
+    // 재실행 시 inFlight를 지우면 진행 중 요청이 캐시 없이 끝나 반복 호출됨 — 완료 시에만 delete
     return () => {
       cancelled = true;
-      missingIds.forEach((id) => limitedCardPackEgogiftInFlightRef.current.delete(id));
     };
-  }, [limitedCardPacks, selectedLimitedCardPackIds]);
+  }, [embeddedModalLayout, limitedCardPackCatalogIdsKey]);
 
   // 해시태그 드롭다운 외부 클릭 시 닫기
   useEffect(() => {
@@ -845,6 +880,56 @@ export function EgoGiftPageContent({
 
   // 클라이언트 측 필터링 로직
   const filteredEgoGifts = useMemo(() => {
+    const KEYWORD_ORDER = [
+      "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격", "범용", "기타",
+    ];
+    const keywordOrder = (name: string | undefined) => {
+      if (!name) return KEYWORD_ORDER.length;
+      const i = KEYWORD_ORDER.indexOf(name.trim());
+      return i >= 0 ? i : KEYWORD_ORDER.length;
+    };
+    const tierOrder = (tier: string | undefined) => {
+      if (!tier) return 99;
+      const t = String(tier).trim().toUpperCase();
+      if (t === "1") return 1;
+      if (t === "2") return 2;
+      if (t === "3") return 3;
+      if (t === "4") return 4;
+      if (t === "5") return 5;
+      if (t === "EX") return 6;
+      return 99;
+    };
+    const gradeOrder = (grades: string[] | undefined) => {
+      if (!grades || grades.length === 0) return 99;
+      let min = 99;
+      for (const g of grades) {
+        if (g === "N") min = Math.min(min, 1);
+        else if (g === "H") min = Math.min(min, 2);
+        else if (g === "E") min = Math.min(min, 3);
+      }
+      return min;
+    };
+    const sortEgoGifts = (list: EgoGift[]) =>
+      [...list].sort((a, b) => {
+        const kw = keywordOrder(a.keywordName) - keywordOrder(b.keywordName);
+        if (kw !== 0) return kw;
+        const d = tierOrder(b.giftTier) - tierOrder(a.giftTier);
+        if (d !== 0) return d;
+        return gradeOrder(a.grades) - gradeOrder(b.grades);
+      });
+
+    /** 보고서 모달「선택 에고기프트」: 별 목록만 표시(키워드 등 필터는 적용하지 않아 누락 방지), 제목 검색만 부분 적용 */
+    if (embeddedModalLayout && showOnlySelectedEgoGifts) {
+      if (!starredEgoGiftIds?.length) return [];
+      const selectedSet = new Set(starredEgoGiftIds);
+      let filtered = allEgoGiftsFull.filter((e) => selectedSet.has(e.egogiftId));
+      if (egogiftFilters.giftName?.trim()) {
+        const q = egogiftFilters.giftName.toLowerCase();
+        filtered = filtered.filter((eg) => eg.giftName.toLowerCase().includes(q));
+      }
+      return sortEgoGifts(filtered);
+    }
+
     let filtered = [...allEgoGiftsFull];
 
     // 제목 검색
@@ -911,42 +996,7 @@ export function EgoGiftPageContent({
     }
 
     // 정렬: 키워드별 순서 → 등급(높은 등급 우선) → 출현난이도(노말→하드→익스트림)
-    const KEYWORD_ORDER = [
-      "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격", "범용", "기타",
-    ];
-    const keywordOrder = (name: string | undefined) => {
-      if (!name) return KEYWORD_ORDER.length;
-      const i = KEYWORD_ORDER.indexOf(name.trim());
-      return i >= 0 ? i : KEYWORD_ORDER.length;
-    };
-    const tierOrder = (tier: string | undefined) => {
-      if (!tier) return 99;
-      const t = String(tier).trim().toUpperCase();
-      if (t === "1") return 1;
-      if (t === "2") return 2;
-      if (t === "3") return 3;
-      if (t === "4") return 4;
-      if (t === "5") return 5;
-      if (t === "EX") return 6;
-      return 99;
-    };
-    const gradeOrder = (grades: string[] | undefined) => {
-      if (!grades || grades.length === 0) return 99;
-      let min = 99;
-      for (const g of grades) {
-        if (g === "N") min = Math.min(min, 1);
-        else if (g === "H") min = Math.min(min, 2);
-        else if (g === "E") min = Math.min(min, 3);
-      }
-      return min;
-    };
-    return [...filtered].sort((a, b) => {
-      const kw = keywordOrder(a.keywordName) - keywordOrder(b.keywordName);
-      if (kw !== 0) return kw;
-      const d = tierOrder(b.giftTier) - tierOrder(a.giftTier);
-      if (d !== 0) return d;
-      return gradeOrder(a.grades) - gradeOrder(b.grades);
-    });
+    return sortEgoGifts(filtered);
   }, [
     allEgoGiftsFull,
     egogiftFilters.giftName,
@@ -959,6 +1009,9 @@ export function EgoGiftPageContent({
     tagOperator,
     selectedLimitedCardPackIds,
     selectedLimitedCardPackEgoGiftIdSet,
+    embeddedModalLayout,
+    showOnlySelectedEgoGifts,
+    starredEgoGiftIds,
   ]);
 
   // 필터링된 결과를 상태에 반영
@@ -1466,31 +1519,88 @@ export function EgoGiftPageContent({
     }
   }, [openEgoGiftPreviewRef, handleEgoGiftClick]);
 
+  /** 모달 + 세로 배치(md 미만): 뷰포트 추적 및 최초 접기로 결과 목록 노출 */
+  useEffect(() => {
+    if (!embeddedModalLayout) {
+      setModalStackedViewport(false);
+      return;
+    }
+    const mq = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      const stacked = mq.matches;
+      setModalStackedViewport(stacked);
+      if (stacked && !modalStackedInitialCollapseDoneRef.current) {
+        modalStackedInitialCollapseDoneRef.current = true;
+        setSearchConditionsCollapsed(true);
+      }
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [embeddedModalLayout]);
+
   const baseUrl = API_BASE_URL.replace("/api", "");
 
+  /** 모달 가로배치(md+)에서는 검색조건 항상 펼침 · 세로배치에서는 접기 상태 반영 */
+  const searchConditionsCollapsedUi =
+    embeddedModalLayout && !modalStackedViewport ? false : searchConditionsCollapsed;
 
   const flexRow = (
-    <div className="flex flex-col md:flex-row gap-6">
-            {/* 검색 조건 (slotAboveSearch 있으면 그 위에 표시) - embedded일 때 왼쪽 전체 sticky */}
-            <div className={"w-full md:w-[285px] flex-shrink-0 order-1 md:order-1 space-y-4 " + (embedded ? "md:sticky md:top-[120px] md:self-start" : "")}>
+    <div
+      className={
+        "flex flex-col md:flex-row gap-6 min-h-0" +
+        (embeddedModalLayout ? " min-h-0 flex-1 md:min-h-0 md:items-stretch" : "")
+      }
+    >
+            {/* 검색 조건 (slotAboveSearch 있으면 그 위에 표시) - embedded일 때 왼쪽 전체 sticky, 모달 레이아웃이면 sticky 해제 */}
+            <div
+              className={
+                "w-full md:w-[285px] flex-shrink-0 order-1 md:order-1 space-y-4 " +
+                (embedded
+                  ? embeddedModalLayout
+                    ? "md:flex md:min-h-0 md:h-full md:flex-col"
+                    : "md:sticky md:top-[120px] md:self-start"
+                  : "")
+              }
+            >
               {slotAboveSearch}
-              <div ref={searchConditionsRef} className={`relative bg-[#131316] border border-[#b8860b]/40 rounded p-4 overflow-visible ${embedded ? "" : "md:sticky md:top-20"} ${hashtagsOpen ? "z-[200]" : "z-[100]"}`} id="search-conditions-container">
+              <div
+                ref={searchConditionsRef}
+                className={`relative bg-[#131316] border border-[#b8860b]/40 rounded p-4 ${
+                  embeddedModalLayout
+                    ? modalStackedViewport
+                      ? "max-h-[min(72vh,calc(92vh-11rem))] overflow-y-auto overflow-x-visible [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:#b8860b_#1a1a1a] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-[#1a1a1a] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#b8860b]/50 [&::-webkit-scrollbar-thumb:hover]:bg-[#d4af37]/70"
+                      : "md:min-h-0 md:flex-1 md:max-h-full overflow-y-auto overflow-x-visible [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:#b8860b_#1a1a1a] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-[#1a1a1a] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#b8860b]/50 [&::-webkit-scrollbar-thumb:hover]:bg-[#d4af37]/70"
+                    : "overflow-visible"
+                } ${embedded ? "" : "md:sticky md:top-20"} ${hashtagsOpen ? "z-[200]" : "z-[100]"}`}
+                id="search-conditions-container"
+              >
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-yellow-300">검색 조건</h2>
-                  {/* 모바일 또는 embedded일 때 접기/펼치기 버튼 표시 */}
-                  <button
-                    onClick={() => setSearchConditionsCollapsed(!searchConditionsCollapsed)}
-                    className={(embedded ? "" : "md:hidden") + " text-yellow-300 hover:text-yellow-200 transition-colors"}
-                    aria-label={searchConditionsCollapsed ? "검색 조건 펼치기" : "검색 조건 접기"}
-                  >
-                    <span className={`transition-transform duration-200 ${searchConditionsCollapsed ? "rotate-180" : ""}`}>
-                      ▼
-                    </span>
-                  </button>
+                  {/* 모바일·embedded·모달세로배치에서 접기/펼치기 */}
+                  {(!embeddedModalLayout || (embeddedModalLayout && modalStackedViewport)) && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchConditionsCollapsed(!searchConditionsCollapsed)}
+                      className={`${
+                        embeddedModalLayout && modalStackedViewport
+                          ? ""
+                          : embedded
+                            ? ""
+                            : "md:hidden "
+                      }text-yellow-300 hover:text-yellow-200 transition-colors`}
+                      aria-label={searchConditionsCollapsed ? "검색 조건 펼치기" : "검색 조건 접기"}
+                      aria-expanded={!searchConditionsCollapsed}
+                    >
+                      <span className={`transition-transform duration-200 ${searchConditionsCollapsed ? "rotate-180" : ""}`}>
+                        ▼
+                      </span>
+                    </button>
+                  )}
                 </div>
                 
                 {/* 접혀있을 때 선택된 조건 요약 (모바일 또는 embedded일 때 표시) - 부드럽게 접기/펼치기 */}
-                <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: searchConditionsCollapsed ? "1fr" : "0fr" }}>
+                <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: searchConditionsCollapsedUi ? "1fr" : "0fr" }}>
                   <div className="min-h-0 overflow-hidden">
                     <div className={(embedded ? "" : "md:hidden") + " space-y-2 text-sm"}>
                     {egogiftSearchText && (
@@ -1598,7 +1708,7 @@ export function EgoGiftPageContent({
                 </div>
                 
                 {/* 검색 조건 폼 - 부드럽게 접기/펼치기 */}
-                <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: searchConditionsCollapsed ? "0fr" : "1fr" }}>
+                <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: searchConditionsCollapsedUi ? "0fr" : "1fr" }}>
                   <div className="min-h-0 overflow-hidden">
                 <div className={embedded ? "block" : "md:block"}>
                 
@@ -1779,6 +1889,28 @@ export function EgoGiftPageContent({
                     >
                       검색
                     </button>
+                    {embeddedModalLayout && (
+                      <>
+                        <div className="my-3 border-t border-[#b8860b]/35" aria-hidden />
+                        <button
+                          type="button"
+                          onClick={() => setShowOnlySelectedEgoGifts((v) => !v)}
+                          className={`w-full px-4 py-2 rounded font-semibold transition-colors border ${
+                            showOnlySelectedEgoGifts
+                              ? "border-amber-400/70 bg-amber-500/25 text-amber-100 hover:bg-amber-500/35"
+                              : "border-[#b8860b]/40 bg-[#2a2a2d] text-gray-200 hover:bg-[#353538] hover:border-[#d4af37]/50"
+                          }`}
+                          aria-pressed={showOnlySelectedEgoGifts}
+                          title={
+                            showOnlySelectedEgoGifts
+                              ? "전체 검색 결과 보기"
+                              : "보고서에 추가한 에고기프트만 목록에 표시"
+                          }
+                        >
+                          선택 에고기프트
+                        </button>
+                      </>
+                    )}
                   </div>
                   
                   <div>
@@ -2053,8 +2185,15 @@ export function EgoGiftPageContent({
               </div>
             </div>
 
-            {/* 결과 */}
-            <div className="flex-1 order-2 md:order-2 relative z-0">
+            {/* 결과 (모달 레이아웃: 높이는 검색조건 패널과 동일, 내부만 스크롤) */}
+            <div
+              className={
+                "flex-1 order-2 md:order-2 relative z-0 min-h-0" +
+                (embeddedModalLayout
+                  ? " overflow-y-auto [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:#b8860b_#1a1a1a] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-[#1a1a1a] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#b8860b]/55 [&::-webkit-scrollbar-thumb:hover]:bg-[#d4af37]/70"
+                  : "")
+              }
+            >
               {/* 부드러운 페이드인 결과 영역 */}
               {egogifts.length === 0 && !egogiftLoading ? (
                 <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-8 text-center text-gray-400 fade-in-soft">
@@ -2062,7 +2201,13 @@ export function EgoGiftPageContent({
                 </div>
               ) : (
                 <div className={`fade-in-soft ${egogiftLoading ? "opacity-60" : "opacity-100"} transition-opacity`}>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 mb-6">
+                  <div
+                    className={
+                      embeddedModalLayout
+                        ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 2xl:grid-cols-5 gap-2 sm:gap-2.5 md:gap-3 lg:gap-3 mb-6"
+                        : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 mb-6"
+                    }
+                  >
                     {egogifts.map((egogift) => (
                       <div
                         key={egogift.egogiftId}
@@ -2076,9 +2221,11 @@ export function EgoGiftPageContent({
                             setPreviewHashtags(data.tags || []);
                           }
                         }}
-                        className="rounded p-3 cursor-pointer hover:scale-[1.02] hover:ring-2 hover:ring-yellow-400 transition-all duration-200 bg-[#131316] border border-[#b8860b]/40"
+                        className={`rounded cursor-pointer hover:scale-[1.02] hover:ring-2 hover:ring-yellow-400 transition-all duration-200 bg-[#131316] border border-[#b8860b]/40 ${
+                          embeddedModalLayout ? "p-2 sm:p-2.5" : "p-3"
+                        }`}
                       >
-                        <div className="relative aspect-square mb-2">
+                        <div className={`relative aspect-square ${embeddedModalLayout ? "mb-1.5" : "mb-2"}`}>
                           <img
                             src="/images/egogift/egogift_frame.webp"
                             alt="frame"
@@ -2093,11 +2240,17 @@ export function EgoGiftPageContent({
                                 e.stopPropagation();
                                 onStarClick(egogift.egogiftId);
                               }}
-                              className="absolute top-1 right-1 z-30 w-16 h-16 md:w-[51px] md:h-[51px] flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition-colors"
+                              className={`absolute top-1 right-1 z-30 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition-colors ${
+                                embeddedModalLayout
+                                  ? "w-10 h-10 sm:w-11 sm:h-11 lg:w-10 lg:h-10"
+                                  : "w-16 h-16 md:w-[51px] md:h-[51px]"
+                              }`}
                               title={starredEgoGiftIds.includes(egogift.egogiftId) ? "즐겨찾기 해제" : "즐겨찾기"}
                             >
                               <svg
-                                className={`w-10 h-10 md:w-8 md:h-8 ${starredEgoGiftIds.includes(egogift.egogiftId) ? "text-yellow-400 fill-yellow-400" : "text-gray-400 fill-none"}`}
+                                className={`${
+                                  embeddedModalLayout ? "w-6 h-6 sm:w-7 sm:h-7 lg:w-6 lg:h-6" : "w-10 h-10 md:w-8 md:h-8"
+                                } ${starredEgoGiftIds.includes(egogift.egogiftId) ? "text-yellow-400 fill-yellow-400" : "text-gray-400 fill-none"}`}
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
                                 strokeWidth={1.5}
@@ -2109,7 +2262,13 @@ export function EgoGiftPageContent({
                             </button>
                           )}
 
-                          <div className="absolute top-1 -left-3 z-20 text-[#ffcc33] scale-x-[0.65] text-5xl drop-shadow-[0_0_5px_rgba(0,0,0,0.9)] select-none tracking-tight leading-none font-black">
+                          <div
+                            className={`absolute top-1 z-20 text-[#ffcc33] scale-x-[0.65] drop-shadow-[0_0_5px_rgba(0,0,0,0.9)] select-none tracking-tight leading-none font-black ${
+                              embeddedModalLayout
+                                ? "-left-2 text-3xl sm:text-4xl lg:text-[2.35rem]"
+                                : "-left-3 text-5xl"
+                            }`}
+                          >
                             {formatEgoGiftTierDisplay(egogift.giftTier)}
                           </div>
 
@@ -2131,7 +2290,11 @@ export function EgoGiftPageContent({
                             };
                             const keywordIcon = iconMap[egogift.keywordName];
                             return keywordIcon ? (
-                              <div className="absolute bottom-[5px] right-[0px] w-9 h-9 z-20 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]">
+                              <div
+                                className={`absolute bottom-[5px] right-[0px] z-20 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)] ${
+                                  embeddedModalLayout ? "w-7 h-7 lg:w-8 lg:h-8" : "w-9 h-9"
+                                }`}
+                              >
                                 <img
                                   src={keywordIcon}
                                   alt={egogift.keywordName}
@@ -2156,7 +2319,11 @@ export function EgoGiftPageContent({
                             </div>
                           )}
                         </div>
-                        <div className="text-base text-center text-gray-300 font-medium space-y-0.5">
+                        <div
+                          className={`text-center text-gray-300 font-medium space-y-0.5 ${
+                            embeddedModalLayout ? "text-xs sm:text-sm leading-snug" : "text-base"
+                          }`}
+                        >
                           <div className="truncate">{egogift.giftName}</div>
                         </div>
                       </div>

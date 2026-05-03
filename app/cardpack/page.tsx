@@ -1302,6 +1302,9 @@ export function CardPackPageContent({
       {isMounted && isModalOpen && createPortal(
         <div 
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cardpack-page-detail-title"
           onClick={closeModal}
         >
           <div 
@@ -1314,9 +1317,9 @@ export function CardPackPageContent({
               </div>
             ) : cardPackDetail ? (
               <>
-                <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative">
+                <div className="flex-1 overflow-y-auto relative">
                   <div className="sticky top-0 bg-[#131316] border-b border-[#b8860b]/40 px-4 sm:px-6 py-4 z-50 flex justify-between items-center backdrop-blur-sm">
-                    <h2 className="text-lg sm:text-xl font-bold text-yellow-300">{cardPackDetail.title}</h2>
+                    <h2 id="cardpack-page-detail-title" className="text-lg sm:text-xl font-bold text-yellow-300">{cardPackDetail.title}</h2>
                     <button
                       onClick={closeModal}
                       className="text-gray-400 hover:text-white text-3xl leading-none font-bold"
@@ -1711,6 +1714,9 @@ export function CardPackPageContent({
       {isMounted && previewEventOpen && previewEvent && createPortal(
         <div 
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cardpack-page-event-preview-title"
           onClick={closeEventModal}
         >
           <div 
@@ -1719,11 +1725,11 @@ export function CardPackPageContent({
           >
             <div 
               ref={modalScrollRef}
-              className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] relative"
+              className="flex-1 overflow-y-auto relative"
             >
               <div className="sticky top-0 bg-[#131316] border-b border-[#b8860b]/40 px-4 sm:px-6 py-4 z-50 flex justify-between items-center backdrop-blur-sm">
                 <div>
-                  <h2 className="text-lg sm:text-xl font-bold text-yellow-300">{previewEvent.title}</h2>
+                  <h2 id="cardpack-page-event-preview-title" className="text-lg sm:text-xl font-bold text-yellow-300">{previewEvent.title}</h2>
                 </div>
                 <button
                   onClick={closeEventModal}

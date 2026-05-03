@@ -21,11 +21,19 @@ import {
   type ObservableEgoCatalogItem,
 } from "./ObservedEgoGiftsSection";
 import {
+  ReportSectionHelpModal,
+  ReportHelpTrigger,
+  type ReportHelpSectionId,
+} from "./ReportSectionHelpModal";
+import {
   inlineExternalImagesForCapture,
   snapshotElementToPngDataUrl,
   downloadPngDataUrl,
   formatCaptureError,
 } from "@/lib/captureDomToPng";
+import { fetchUserPersonalityList, type UserPersonalityListItem } from "@/lib/userPersonalityApi";
+import { fetchUserPersonalityEgoList, type UserPersonalityEgoListItem } from "@/lib/userPersonalityEgoApi";
+import { keywordColorMap } from "@/lib/keywordParser";
 
 /** 관측 카탈로그: 한 페이지(size) 제한을 넘는 전체 건수까지 순회 조회 */
 async function fetchAllUserEgoGiftsForObservableCatalog(signal: AbortSignal): Promise<any[]> {
@@ -75,6 +83,227 @@ async function fetchRecipeResultEgogiftIds(signal: AbortSignal): Promise<Set<num
   return out;
 }
 
+const REPORT_EGO_ACQUIRE_ORDER_REF_URL =
+  "https://arca.live/b/lobotomycoperation/162218167";
+
+const REPORT_EGO_ACQUIRE_ORDER_ENHANCE_NOTE_REF_URL =
+  "https://gall.dcinside.com/mgallery/board/view/?id=limbuscompany&no=462114";
+
+const REPORT_EGO_GRADE_ROMAN: Record<1 | 2 | 3 | 4, string> = {
+  1: "I",
+  2: "II",
+  3: "III",
+  4: "IV",
+};
+
+/** 에고기프트 등급(로마 숫자, 노란색) + 이름 */
+function ReportEgoGiftGradeName({
+  grade,
+  name,
+}: {
+  grade: 1 | 2 | 3 | 4;
+  name: string;
+}) {
+  return (
+    <>
+      <span className="font-semibold tabular-nums text-yellow-400">
+        {REPORT_EGO_GRADE_ROMAN[grade]}
+      </span>{" "}
+      {name}
+    </>
+  );
+}
+
+/** 보고서 내 에고기프트 선택: 키워드 체인(트리거·효과) 요약 표 */
+function ReportEgoGiftKeywordChainTable() {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="mt-4 rounded border border-[#b8860b]/35 bg-[#0f0f12] overflow-hidden">
+      <div className="border-b border-[#b8860b]/25 bg-[#1a1a1d] px-2 py-2 sm:px-3">
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left text-sm font-semibold text-amber-200 transition-colors hover:bg-amber-500/10 hover:text-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50"
+            aria-expanded={expanded}
+          >
+            <span
+              className="inline-flex w-4 shrink-0 select-none text-amber-300/90"
+              aria-hidden
+            >
+              {expanded ? "▼" : "▶"}
+            </span>
+            에고기프트 획득 순서
+          </button>
+          <a
+            href={REPORT_EGO_ACQUIRE_ORDER_REF_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 text-[11px] text-sky-400/95 underline-offset-2 hover:text-sky-300 hover:underline sm:text-xs"
+            onClick={(e) => e.stopPropagation()}
+          >
+            참고 링크
+          </a>
+        </div>
+        <div className="mt-1.5 flex items-baseline justify-between gap-3 pl-0.5 sm:pl-1">
+          <p className="min-w-0 flex-1 text-[11px] leading-snug text-gray-400 sm:text-xs">
+            획득 이후 강화에 따른 순서변경 없음
+          </p>
+          <a
+            href={REPORT_EGO_ACQUIRE_ORDER_ENHANCE_NOTE_REF_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 text-[11px] text-sky-400/95 underline-offset-2 hover:text-sky-300 hover:underline sm:text-xs"
+            onClick={(e) => e.stopPropagation()}
+          >
+            참고 링크
+          </a>
+        </div>
+      </div>
+      {expanded ? (
+        <div className="overflow-x-auto">
+      <table className="w-full min-w-[min(100%,28rem)] text-left text-[11px] sm:text-sm border-collapse">
+        <caption className="sr-only">키워드별 트리거와 효과 발동 정리</caption>
+        <thead>
+          <tr className="border-b border-[#b8860b]/30 bg-[#1a1a1d] text-amber-200/95">
+            <th scope="col" className="px-2 py-2 font-semibold whitespace-nowrap">
+              구분
+            </th>
+            <th scope="col" className="px-2 py-2 font-semibold">
+              트리거
+            </th>
+            <th scope="col" className="px-2 py-2 font-semibold">
+              효과 발동
+            </th>
+            <th scope="col" className="px-2 py-2 font-semibold">
+              특이사항
+            </th>
+          </tr>
+        </thead>
+        <tbody className="text-gray-300 [&_td]:align-top [&_td]:border-b [&_td]:border-[#b8860b]/15 [&_td]:px-2 [&_td]:py-1.5">
+          <tr>
+            <td
+              className={`whitespace-nowrap font-medium ${keywordColorMap["화상"]}`}
+            >
+              화상
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={3} name="먼지에서 먼지로" />
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={3} name="그을린 원반" />
+            </td>
+            <td></td>
+          </tr>
+          <tr>
+            <td
+              className={`whitespace-nowrap font-medium ${keywordColorMap["출혈"]}`}
+            >
+              출혈
+            </td>
+            <td>-</td>
+            <td>-</td>
+            <td>순서 상관 없음</td>
+          </tr>
+          <tr>
+            <td
+              className={`whitespace-nowrap font-medium ${keywordColorMap["진동"]}`}
+            >
+              진동
+            </td>
+            <td>-</td>
+            <td>-</td>
+            <td>순서 상관 없음</td>
+          </tr>
+          <tr>
+            <td
+              className={`whitespace-nowrap font-medium ${keywordColorMap["파열"]}`}
+            >
+              파열
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={4} name="쾌감" />
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={1} name="부서진 리볼버" />
+            </td>
+            <td></td>
+          </tr>
+          <tr>
+            <td
+              className={`whitespace-nowrap font-medium ${keywordColorMap["침잠"]}`}
+            >
+              침잠
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={3} name="고장난 나침반" /> or{" "}
+              <ReportEgoGiftGradeName grade={4} name="서릿발 발자국" />
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={2} name="녹아내린 시계태엽" />
+            </td>
+            <td></td>
+          </tr>
+          <tr>
+            <td
+              className={`whitespace-nowrap font-medium align-middle ${keywordColorMap["호흡"]}`}
+              rowSpan={2}
+            >
+              호흡
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={2} name="네뷸라이저" />
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={2} name="물부리" />,{" "}
+              <ReportEgoGiftGradeName grade={2} name="톱니파편" />
+            </td>
+            <td></td>
+          </tr>
+          <tr>
+            <td>
+              <ReportEgoGiftGradeName grade={2} name="네뷸라이저++" />
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={3} name="미련" />
+            </td>
+            <td></td>
+          </tr>
+          <tr>
+            <td
+              className={`whitespace-nowrap font-medium align-middle ${keywordColorMap["충전"]}`}
+              rowSpan={2}
+            >
+              충전
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={4} name="충전식 장갑" /> or{" "}
+              <ReportEgoGiftGradeName grade={3} name="피뢰침(++)" />
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={1} name="손목 보호대" />
+            </td>
+            <td></td>
+          </tr>
+          <tr>
+            <td>
+              <ReportEgoGiftGradeName grade={4} name="충전식 장갑(++)" /> +{" "}
+              <ReportEgoGiftGradeName grade={3} name="피뢰침" />
+            </td>
+            <td>
+              <ReportEgoGiftGradeName grade={2} name="야간 투시경" />
+            </td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 interface FavoriteItem {
   favoriteId: number;
   pageType: string;
@@ -117,13 +346,215 @@ interface ShareBoardCommentItem {
   isMine?: boolean;
 }
 
-type FavoritesTab = "egogift" | "result" | "share-board";
+type FavoritesTab = "result" | "share-board";
 
 const TAB_LIST: { key: FavoritesTab; label: string }[] = [
   { key: "result", label: "파우스트의 보고서" },
-  { key: "egogift", label: "에고기프트" },
   { key: "share-board", label: "공유게시판" },
 ];
+
+/** 파우스트의 보고서 — 인격(수감자) 선택용 (관리자 인격 order 와 동일) */
+const REPORT_PERSONALITY_OPTIONS = [
+  { order: 1, name: "이상", image: "/images/identities/yi-sang.png" },
+  { order: 2, name: "파우스트", image: "/images/identities/faust.png" },
+  { order: 3, name: "돈키호테", image: "/images/identities/don-quixote.png" },
+  { order: 4, name: "로슈", image: "/images/identities/ryoshu.png" },
+  { order: 5, name: "뫼르소", image: "/images/identities/meursault.png" },
+  { order: 6, name: "홍루", image: "/images/identities/hong-lu.png" },
+  { order: 7, name: "히스클리프", image: "/images/identities/heathcliff.png" },
+  { order: 8, name: "이스마엘", image: "/images/identities/ishmael.png" },
+  { order: 9, name: "로쟈", image: "/images/identities/rodion.png" },
+  { order: 11, name: "싱클레어", image: "/images/identities/sinclair.png" },
+  { order: 12, name: "오티스", image: "/images/identities/outis.png" },
+  { order: 13, name: "그레고르", image: "/images/identities/gregor.png" },
+] as const;
+const REPORT_PERSONALITY_ICON_BACKGROUND_BY_ORDER: Record<number, string> = {
+  1: "/images/identities/Yi_Sang_Icon.png",
+  2: "/images/identities/Faust_Icon.png",
+  3: "/images/identities/Don_Quixote_Icon.png",
+  4: "/images/identities/Ryoshu_Icon.png",
+  5: "/images/identities/Meursault_Icon.png",
+  6: "/images/identities/Hong_Lu_Icon.png",
+  7: "/images/identities/Heathcliff_Icon.png",
+  8: "/images/identities/Ishmael_Icon.png",
+  9: "/images/identities/Rodion_Icon.png",
+  11: "/images/identities/Sinclair_Icon.png",
+  12: "/images/identities/Outis_Icon.png",
+  13: "/images/identities/Gregor_Icon.png",
+};
+
+/** 보고서 12슬롯(수감자 순)에 저장되는 선택 인격 1칸 */
+type ReportPersonalitySlotSaved = {
+  personalityId: number;
+  name: string;
+  grade: number;
+  imagePath: string;
+  keywords?: string[];
+  beforeSyncImagePath?: string;
+  afterSyncImagePath?: string;
+  useAfterSyncImage?: boolean;
+  formationOrder?: number | null;
+  skillAttributes?: string[];
+  skillAttackTypes?: string[];
+  skillInputValues?: string[];
+};
+
+type ReportEgoPickItem = {
+  egoId: number;
+  title: string;
+  libraryGrade: string;
+  imagePath: string;
+  wrathCost: number;
+  lustCost: number;
+  slothCost: number;
+  gluttonyCost: number;
+  gloomCost: number;
+  prideCost: number;
+  envyCost: number;
+};
+
+type ReportEgoSlotSaved = {
+  selectedByGrade: Partial<Record<"ZAYIN" | "TETH" | "HE" | "WAW" | "ALEPH", ReportEgoPickItem>>;
+};
+
+const REPORT_EGO_GRADE_ORDER = ["ZAYIN", "TETH", "HE", "WAW", "ALEPH"] as const;
+const EGO_RESOURCE_ICON_MAP: Record<string, string> = {
+  분노: "/images/keyword/Wrath.webp",
+  색욕: "/images/keyword/Lust.webp",
+  나태: "/images/keyword/Sloth.webp",
+  탐식: "/images/keyword/Gluttony.webp",
+  우울: "/images/keyword/Gloom.webp",
+  오만: "/images/keyword/Pride.webp",
+  질투: "/images/keyword/Envy.webp",
+};
+const EGO_GRADE_LABEL_ICON_MAP: Record<string, string> = {
+  ZAYIN: "/images/keyword/ZAYIN_Label.webp",
+  TETH: "/images/keyword/TETH_Label.webp",
+  HE: "/images/keyword/HE_Label.webp",
+  WAW: "/images/keyword/WAW_Label.webp",
+};
+const SKILL_ATTRIBUTE_BORDER_COLOR_MAP: Record<string, string> = {
+  분노: "#ef4444",
+  색욕: "#f97316",
+  나태: "#eab308",
+  탐식: "#22c55e",
+  우울: "#22d3ee",
+  오만: "#2563eb",
+  질투: "#a855f7",
+};
+
+function extractPathFromUnknownImage(raw: unknown): string {
+  if (typeof raw === "string") return raw.trim();
+  if (raw && typeof raw === "object" && "path" in (raw as Record<string, unknown>)) {
+    return String((raw as { path?: unknown }).path ?? "").trim();
+  }
+  return "";
+}
+
+function emptyReportPersonalitySlots(): (ReportPersonalitySlotSaved | null)[] {
+  return Array.from({ length: 12 }, () => null);
+}
+
+function parseReportPersonalitySlots(raw: unknown): (ReportPersonalitySlotSaved | null)[] {
+  const out = emptyReportPersonalitySlots();
+  if (!Array.isArray(raw)) return out;
+  for (let i = 0; i < 12 && i < raw.length; i++) {
+    const el = raw[i];
+    if (el == null || typeof el !== "object") {
+      out[i] = null;
+      continue;
+    }
+    const o = el as Record<string, unknown>;
+    const personalityId = Number(o.personalityId);
+    if (!Number.isFinite(personalityId) || personalityId <= 0) {
+      out[i] = null;
+      continue;
+    }
+    const name = String(o.name ?? "").trim();
+    const grade = Number(o.grade);
+    const imagePath = String(o.imagePath ?? o.thumbPath ?? "").trim();
+    const keywords = Array.isArray(o.keywords)
+      ? (o.keywords as unknown[])
+          .map((k) => String(k ?? "").trim())
+          .filter(Boolean)
+      : [];
+    const beforeSyncImagePath = String(
+      o.beforeSyncImagePath ?? extractPathFromUnknownImage(o.beforeSyncImage),
+    ).trim();
+    const afterSyncImagePath = String(
+      o.afterSyncImagePath ?? extractPathFromUnknownImage(o.afterSyncImage),
+    ).trim();
+    const useAfterSyncImage = Boolean(o.useAfterSyncImage);
+    const skillAttributes = Array.isArray(o.skillAttributes)
+      ? (o.skillAttributes as unknown[]).map((v) => String(v ?? "").trim()).filter(Boolean).slice(0, 3)
+      : [];
+    const skillAttackTypes = Array.isArray(o.skillAttackTypes)
+      ? (o.skillAttackTypes as unknown[]).map((v) => String(v ?? "").trim()).filter(Boolean).slice(0, 3)
+      : [];
+    const skillInputValues = Array.isArray(o.skillInputValues)
+      ? (o.skillInputValues as unknown[]).map((v) => String(v ?? "").trim()).slice(0, 3)
+      : [];
+    const formationOrderRaw = Number(o.formationOrder);
+    const formationOrder =
+      Number.isFinite(formationOrderRaw) && formationOrderRaw >= 1 && formationOrderRaw <= 12
+        ? formationOrderRaw
+        : null;
+    out[i] = {
+      personalityId,
+      name: name || "이름 없음",
+      grade: Number.isFinite(grade) ? grade : 0,
+      imagePath,
+      keywords,
+      beforeSyncImagePath,
+      afterSyncImagePath,
+      useAfterSyncImage,
+      formationOrder,
+      skillAttributes,
+      skillAttackTypes,
+      skillInputValues,
+    };
+  }
+  return out;
+}
+
+function emptyReportEgoSlots(): ReportEgoSlotSaved[] {
+  return Array.from({ length: 12 }, () => ({ selectedByGrade: {} }));
+}
+
+function parseReportEgoSlots(raw: unknown): ReportEgoSlotSaved[] {
+  const out = emptyReportEgoSlots();
+  if (!Array.isArray(raw)) return out;
+  for (let i = 0; i < 12 && i < raw.length; i += 1) {
+    const el = raw[i];
+    if (!el || typeof el !== "object") continue;
+    const o = el as Record<string, unknown>;
+    const selectedRaw = o.selectedByGrade;
+    const selectedByGrade: ReportEgoSlotSaved["selectedByGrade"] = {};
+    if (selectedRaw && typeof selectedRaw === "object") {
+      for (const grade of REPORT_EGO_GRADE_ORDER) {
+        const v = (selectedRaw as Record<string, unknown>)[grade];
+        if (!v || typeof v !== "object") continue;
+        const egoId = Number((v as Record<string, unknown>).egoId);
+        if (!Number.isFinite(egoId) || egoId <= 0) continue;
+        selectedByGrade[grade] = {
+          egoId,
+          title: String((v as Record<string, unknown>).title ?? "").trim() || "이름 없음",
+          libraryGrade: grade,
+          imagePath: String((v as Record<string, unknown>).imagePath ?? "").trim(),
+          wrathCost: Number((v as Record<string, unknown>).wrathCost ?? 0) || 0,
+          lustCost: Number((v as Record<string, unknown>).lustCost ?? 0) || 0,
+          slothCost: Number((v as Record<string, unknown>).slothCost ?? 0) || 0,
+          gluttonyCost: Number((v as Record<string, unknown>).gluttonyCost ?? 0) || 0,
+          gloomCost: Number((v as Record<string, unknown>).gloomCost ?? 0) || 0,
+          prideCost: Number((v as Record<string, unknown>).prideCost ?? 0) || 0,
+          envyCost: Number((v as Record<string, unknown>).envyCost ?? 0) || 0,
+        };
+      }
+    }
+    out[i] = { selectedByGrade };
+  }
+  return out;
+}
 
 /** 결과 탭 모아보기: 단일 ResultKeywordSection(ref·접기 state 키) */
 const RESULT_EGO_FLAT_SECTION_KEY = "__flat__";
@@ -181,6 +612,14 @@ function v2SlotBorderClass(d: V2PlannedDifficultyKey | undefined): string {
   return "border-red-500 hover:border-red-400 ring-1 ring-red-500/40";
 }
 
+/** 간소화 목록 줄 — 난이도 글자색(노말·하드·익스트림) */
+function v2DifficultyLineTextClass(d: V2PlannedDifficultyKey | undefined): string {
+  if (!d) return "text-amber-200/90";
+  if (d === "노말") return "text-lime-300";
+  if (d === "하드") return "text-pink-300";
+  return "text-red-400";
+}
+
 /** 모달 열 때 층별 난이도 탭 초기값: 1~5 노말, 6층 이상 익스트림(평행중첩) */
 function getV2ModalDefaultDifficultyForFloor(floor: number): V2PlannedDifficultyKey {
   if (floor >= 6) return "익스트림";
@@ -196,6 +635,9 @@ const MODAL_DIFFICULTY_ALLOWED: Record<string, string[]> = {
 const RESULT_KEYWORD_ORDER = [
   "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격", "범용", "기타",
 ];
+const START_EGOGIFT_KEYWORD_ORDER = [
+  "화상", "출혈", "진동", "파열", "침잠", "호흡", "충전", "참격", "관통", "타격",
+] as const;
 
 function previewTierSortOrder(tier: string | undefined): number {
   if (tier == null || tier === "") return 99;
@@ -236,8 +678,35 @@ function parseResultEgoGiftViewMode(parsed: {
 }): ResultEgoGiftViewMode {
   const m = parsed.resultEgoGiftViewMode;
   if (m === "keyword" || m === "flat" || m === "floor") return m;
+  if (typeof m === "string") {
+    const t = m.trim();
+    if (t === "keyword" || t === "flat" || t === "floor") return t;
+  }
   if (parsed.resultEgoGiftViewByKeyword === false) return "flat";
+  /* 값 없음·알 수 없는 값 → 키워드별 보기 */
   return "keyword";
+}
+
+/** searchJson 안의 결과 탭 UI(간소화·접기 등) — 없으면 초기값과 동일하게 처리 */
+function parseResultTabUiPrefs(parsed: Record<string, unknown>) {
+  const bool = (key: string, defaultVal: boolean) =>
+    typeof parsed[key] === "boolean" ? (parsed[key] as boolean) : defaultVal;
+  return {
+    resultSimplified: bool("resultSimplified", false),
+    v2PlannedSectionExpanded: bool("v2PlannedSectionExpanded", true),
+    v2PlannedSectionSimplified: bool("v2PlannedSectionSimplified", false),
+    missedLimitedCardPacksExpanded: bool("missedLimitedCardPacksExpanded", true),
+    pinnedEgoSectionsExpanded: bool("pinnedEgoSectionsExpanded", true),
+    pinnedEgoSectionsSimplified: bool("pinnedEgoSectionsSimplified", true),
+  };
+}
+
+function parsePinnedEgoGiftIds(raw: unknown, maxCount = 3): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => Number(x))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .slice(0, maxCount);
 }
 
 /** 합성 결과 에고 ID로 조합식 재료 egogiftId 목록 조회 (합성 결과가 아니면 빈 배열) */
@@ -354,10 +823,148 @@ const RESULT_KEYWORD_ICON_MAP: Record<string, string> = {
   침잠: "/images/keyword/Sinking.webp",
   호흡: "/images/keyword/Poise.webp",
   충전: "/images/keyword/Charge.webp",
+  탄환: "/images/keyword/bullet.webp",
   참격: "/images/keyword/slash.webp",
   관통: "/images/keyword/penetration.webp",
   타격: "/images/keyword/blow.webp",
 };
+
+const PERSONALITY_MODAL_KEYWORD_ORDER = [
+  "화상",
+  "출혈",
+  "진동",
+  "파열",
+  "침잠",
+  "호흡",
+  "충전",
+  "탄환",
+  "참격",
+  "관통",
+  "타격",
+] as const;
+
+/** 인격 모달: API 키워드 문자열 → 아이콘 경로 (침장 등 오타 보정, 정해진 순서 우선) */
+function getPersonalityKeywordIconPaths(keywords: string[] | undefined): string[] {
+  if (!keywords?.length) return [];
+  const normalized = keywords
+    .map((raw) => {
+      const t = String(raw ?? "").trim();
+      if (t === "침장") return "침잠";
+      return t;
+    })
+    .filter(Boolean);
+  const paths: string[] = [];
+  const used = new Set<string>();
+  for (const kw of PERSONALITY_MODAL_KEYWORD_ORDER) {
+    if (normalized.includes(kw)) {
+      const p = RESULT_KEYWORD_ICON_MAP[kw];
+      if (p && !used.has(p)) {
+        used.add(p);
+        paths.push(p);
+      }
+    }
+  }
+  for (const t of normalized) {
+    const p = RESULT_KEYWORD_ICON_MAP[t];
+    if (p && !used.has(p)) {
+      used.add(p);
+      paths.push(p);
+    }
+  }
+  return paths;
+}
+
+function getSkillAttributeBorderColor(attributes: string[] | undefined, idx: number): string {
+  const attr = String(attributes?.[idx] ?? "").trim();
+  return SKILL_ATTRIBUTE_BORDER_COLOR_MAP[attr] ?? "rgba(184,134,11,0.25)";
+}
+
+/** 스킬 속성 문자열 → 자원 키 (분노·색욕·…). 매칭 실패 시 null */
+function normalizeSkillResourceAttribute(raw: string): string | null {
+  const t = String(raw ?? "").trim();
+  if (!t) return null;
+  if (EGO_RESOURCE_ICON_MAP[t]) return t;
+  if (SKILL_ATTRIBUTE_BORDER_COLOR_MAP[t]) return t;
+  return null;
+}
+
+const SKILL_RESOURCE_ATTRIBUTE_ORDER = ["분노", "색욕", "나태", "탐식", "우울", "오만", "질투"] as const;
+
+/**
+ * 편성 인격(formationOrder 1~7)만 — 스킬별 「기준」값이 1 이상인 칸만 포함.
+ * 한 인격 안에서 같은 속성이 여러 스킬에 있으면 그 인격에서는 그 속성을 1번만 반영한 뒤,
+ * 편성 인원 전체에서는 인격별 기여를 합산한다.
+ */
+function computeFormationRound1AcquirableResources(
+  slots: (ReportPersonalitySlotSaved | null)[]
+): Array<{ name: string; iconPath: string; count: number }> {
+  const acc: Record<string, number> = {
+    분노: 0,
+    색욕: 0,
+    나태: 0,
+    탐식: 0,
+    우울: 0,
+    오만: 0,
+    질투: 0,
+  };
+  for (const slot of slots) {
+    if (!slot || !slot.formationOrder || slot.formationOrder < 1 || slot.formationOrder > 7) continue;
+    const attrs = slot.skillAttributes ?? [];
+    const values = slot.skillInputValues ?? [];
+    /** 동일 인격 슬롯 내 속성 중복은 1회만 */
+    const uniqueAttrsThisIdentity = new Set<string>();
+    for (let idx = 0; idx < 3; idx++) {
+      const rawVal = String(values[idx] ?? "").trim();
+      const fallback = idx === 0 ? "3" : idx === 1 ? "2" : "1";
+      const merged = rawVal || fallback;
+      const n = Number(merged);
+      if (!Number.isFinite(n) || n < 1) continue;
+      const resName = normalizeSkillResourceAttribute(String(attrs[idx] ?? ""));
+      if (!resName) continue;
+      uniqueAttrsThisIdentity.add(resName);
+    }
+    for (const name of uniqueAttrsThisIdentity) {
+      if (acc[name] !== undefined) acc[name] += 1;
+    }
+  }
+  return SKILL_RESOURCE_ATTRIBUTE_ORDER.filter((name) => acc[name] > 0).map((name) => ({
+    name,
+    iconPath: EGO_RESOURCE_ICON_MAP[name],
+    count: acc[name],
+  }));
+}
+
+function colorWithAlpha(hexColor: string, alpha: number): string {
+  const hex = String(hexColor || "").replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return "rgba(184,134,11,0.08)";
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function getSkillAttackTypeIconPath(attackTypes: string[] | undefined, idx: number): string | null {
+  const t = String(attackTypes?.[idx] ?? "").trim();
+  if (!t) return null;
+  return RESULT_KEYWORD_ICON_MAP[t] ?? null;
+}
+
+function normalizePersonalityKeyword(raw: unknown): string {
+  const t = String(raw ?? "").trim();
+  if (t === "침장") return "침잠";
+  return t;
+}
+
+/** 인격 카드 등급별 테두리 톤 (1성 기본 유지, 2성 빨강, 3성 노랑) */
+function personalityGradeCardToneClass(grade: number | undefined): string {
+  if (grade === 2) {
+    return "border-red-500/75 ring-1 ring-red-500/35 bg-red-500/10 hover:border-red-400/80";
+  }
+  if (grade === 3) {
+    return "border-yellow-400/75 ring-1 ring-yellow-400/35 bg-yellow-400/10 hover:border-yellow-300/85";
+  }
+  return "border-[#b8860b]/40 bg-[#1a1a1d] hover:border-[#d4af37]/50";
+}
 
 /** 한정 에고기프트 ID 집합 동일 여부 (순서 무관) */
 function limitedEgoGiftIdSetsEqual(a: number[], b: number[]): boolean {
@@ -404,6 +1011,10 @@ function FavoritesPageClient() {
   const [error, setError] = useState<string | null>(null);
   /** 불러오기 모달 표시 여부 및 입력값 */
   const [importShareModalOpen, setImportShareModalOpen] = useState(false);
+  /** 파우스트의 보고서: 에고기프트 검색·선택(기존 에고기프트 탭 UI) 모달 */
+  const [reportEgoGiftSelectModalOpen, setReportEgoGiftSelectModalOpen] = useState(false);
+  /** 결과 탭 섹션별 이미지+설명 도움말 모달 */
+  const [reportSectionHelpId, setReportSectionHelpId] = useState<ReportHelpSectionId | null>(null);
   const [importShareTokenInput, setImportShareTokenInput] = useState("");
   /** 조회 성공 시 표시할 데이터(2단계). null이면 코드 입력 단계 */
   const [importLookupResult, setImportLookupResult] = useState<{ searchJson: string; pageType: string } | null>(null);
@@ -437,34 +1048,47 @@ function FavoritesPageClient() {
   const [shareBoardPreviewSchemaVersion, setShareBoardPreviewSchemaVersion] = useState<number>(1);
   const [shareBoardPreviewCheckedCardPackByFloor, setShareBoardPreviewCheckedCardPackByFloor] = useState<Record<number, number>>({});
   const [shareBoardPreviewPlannedCardPackDifficultyByFloor, setShareBoardPreviewPlannedCardPackDifficultyByFloor] = useState<Record<number, V2PlannedDifficultyKey>>({});
+  const [shareBoardPreviewStartEgoGiftIds, setShareBoardPreviewStartEgoGiftIds] = useState<number[]>([]);
   const [shareBoardPreviewObservedEgoGiftIds, setShareBoardPreviewObservedEgoGiftIds] = useState<number[]>([]);
   const [shareBoardPreviewEgoGiftViewMode, setShareBoardPreviewEgoGiftViewMode] = useState<ResultEgoGiftViewMode>("keyword");
+  const [shareBoardPreviewReportPersonalitySlots, setShareBoardPreviewReportPersonalitySlots] = useState<(ReportPersonalitySlotSaved | null)[]>(() =>
+    emptyReportPersonalitySlots()
+  );
+  const [shareBoardPreviewReportEgoSlots, setShareBoardPreviewReportEgoSlots] = useState<ReportEgoSlotSaved[]>(() =>
+    emptyReportEgoSlots()
+  );
+  const [shareBoardPreviewFlippedSlots, setShareBoardPreviewFlippedSlots] = useState<Record<number, boolean>>({});
+  const [shareBoardPreviewIdentityTab, setShareBoardPreviewIdentityTab] = useState<"personality" | "ego">("personality");
   const [shareBoardComments, setShareBoardComments] = useState<ShareBoardCommentItem[]>([]);
   const [shareBoardCommentsLoading, setShareBoardCommentsLoading] = useState(false);
   const [shareBoardCommentInput, setShareBoardCommentInput] = useState("");
   const [shareBoardReplyParentId, setShareBoardReplyParentId] = useState<number | null>(null);
   const [shareBoardReplyInput, setShareBoardReplyInput] = useState("");
   const [shareBoardCommentSubmitting, setShareBoardCommentSubmitting] = useState(false);
+  const [shareBoardAuthenticated, setShareBoardAuthenticated] = useState(false);
+  const [shareBoardAuthChecked, setShareBoardAuthChecked] = useState(false);
 
   const shareBoardMode = (searchParams.get("shareBoardMode") ?? "list") as "list" | "new" | "detail";
   const shareBoardPostIdParam = Number(searchParams.get("postId") || 0);
   const shareBoardFavoriteIdParam = Number(searchParams.get("favoriteId") || 0);
   /** 삭제 확인 모달: 삭제 대상 favoriteId (null이면 모달 숨김) */
   const [deleteConfirmFavoriteId, setDeleteConfirmFavoriteId] = useState<number | null>(null);
-  /** 에고기프트 탭에서 별로 선택한 에고기프트 ID 목록 (저장 시 JSON에 egogiftIds로 포함) */
+  /** 보고서(에고기프트 모달)에서 별로 선택한 에고기프트 ID 목록 (저장 시 JSON에 egogiftIds로 포함) */
   const [starredEgoGiftIds, setStarredEgoGiftIds] = useState<number[]>([]);
   /** 보고서에 포함된 카드팩 ID (JSON 동기화, 결과 탭 표시용) */
   const [starredCardPackIds, setStarredCardPackIds] = useState<number[]>([]);
   /** 결과 탭: 관측 에고기프트 (최대 3, Ⅳ·EX·조합 결과 등 제외 후보만, searchJson.observedEgoGiftIds) */
   const [observedEgoGiftIds, setObservedEgoGiftIds] = useState<number[]>([]);
+  /** 결과 탭: 시작 에고기프트 (최대 3, searchJson.startEgoGiftIds) */
+  const [startEgoGiftIds, setStartEgoGiftIds] = useState<number[]>([]);
   const [observableEgoGiftCatalog, setObservableEgoGiftCatalog] = useState<ObservableEgoCatalogItem[]>([]);
   const [observableEgoGiftCatalogLoading, setObservableEgoGiftCatalogLoading] = useState(false);
+  /** 결과 탭에서 관측 카탈로그 API를 이미 성공 조회했는지(보고서 바꿀 때마다 전체 재조회 방지, 공유게시판 탭 갔다 오면 다시 조회) */
+  const observableEgoCatalogFetchedRef = useRef(false);
   /** 등록된 즐겨찾기 목록에서 선택한 항목 (favoriteId, null이면 미선택) */
   const [selectedFavoriteId, setSelectedFavoriteId] = useState<number | null>(null);
-  /** 저장 완료 토스트 (내려왔다가 올라가는 안내) */
-  const [saveToastState, setSaveToastState] = useState<"hidden" | "visible" | "exiting">("hidden");
-  /** 토스트가 막 보일 때만 -100%에서 시작해 내려오는 효과용 */
-  const [toastSlideDown, setToastSlideDown] = useState(false);
+  /** 저장(등록·수정·자동저장) 실패 시에만 표시하는 토스트 */
+  const [saveFailureToastMessage, setSaveFailureToastMessage] = useState<string | null>(null);
   /** 결과 탭: 선택한 즐겨찾기의 에고기프트 목록 (키워드별 표시용, 에고기프트 메뉴와 동일 카드 형태) */
   const [resultEgoGifts, setResultEgoGifts] = useState<Array<{
     egogiftId: number;
@@ -488,18 +1112,33 @@ function FavoritesPageClient() {
   const prevStarredEgoGiftIdsForResultFetchRef = useRef<number[]>([]);
   /** 놓친 한정 카드팩 마지막 조회 스냅샷 — 동일 조건·동일 한정 ID면 재요청 생략, 한정 ID만 감소 시 로딩 스킵 */
   const missedLimitedLastFetchSnapshotRef = useRef<MissedLimitedFetchSnapshot | null>(null);
-  /** 스키마 v2+ 자동 저장: 보고서 전환·불러오기 직후 1회는 저장 스킵 */
-  const v2AutosaveSkipNextRef = useRef(true);
+  /** 결과 탭 자동 저장: 보고서 전환·불러오기 직후 1회는 저장 스킵 */
+  const reportAutosaveSkipNextRef = useRef(true);
   /** 키워드별 카드 영역만 캡처용 (키워드 클릭 시, 합성 조합식 제외) */
   const keywordSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   /** 키워드별 합성 조합식 영역만 캡처용 (조합식 클릭 시) */
   const synthesisSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   /** 전체 결과 영역 캡처용 (전체 다운로드 / 전체 다운로드 합성제외) */
   const allResultRef = useRef<HTMLDivElement | null>(null);
+  /** 보고서 인격/에고 선택 섹션 이동용 */
+  const reportIdentitySectionRef = useRef<HTMLDivElement | null>(null);
+  const shareBoardListSectionRef = useRef<HTMLDivElement | null>(null);
+  const shareBoardNewSectionRef = useRef<HTMLDivElement | null>(null);
+  const shareBoardDetailPostInfoSectionRef = useRef<HTMLDivElement | null>(null);
+  const shareBoardDetailPreviewSectionRef = useRef<HTMLDivElement | null>(null);
+  const shareBoardDetailCommentsSectionRef = useRef<HTMLDivElement | null>(null);
+  /** 층별 보기 2depth 이동용 */
+  const floorRangeSectionRefs = useRef<Record<"1-5" | "6-10" | "11-15", HTMLDivElement | null>>({
+    "1-5": null,
+    "6-10": null,
+    "11-15": null,
+  });
   /** 선택한 카드팩 목록 섹션 전체 캡처용 */
   const starredCardPacksSectionRef = useRef<HTMLDivElement | null>(null);
   /** 스키마 v2 진행(예정) 카드팩 그리드 섹션 캡처용 */
   const v2PlannedCardPacksSectionRef = useRef<HTMLDivElement | null>(null);
+  /** 「보고서 내 에고기프트 선택」 블록 — 플로팅 E 이동 */
+  const reportEgoGiftPickSectionRef = useRef<HTMLDivElement | null>(null);
   /** 결과 탭 키워드별 에고: 「정보 보기」 클릭 시 상세 모달 (EgoGiftPageContent가 설정) */
   const egoGiftPreviewOpenRef = useRef<((giftName: string) => void) | null>(null);
   /** 결과 탭에서 카드팩 클릭 시 상세 모달 열기 (CardPackPageContent가 설정) */
@@ -510,7 +1149,39 @@ function FavoritesPageClient() {
   const [keywordGiftExpandedByKeyword, setKeywordGiftExpandedByKeyword] = useState<Record<string, boolean>>({});
   /** 결과 탭 간소화: 이름/출현카드팩/합성 여부만, 조합식은 이름만 */
   const [resultSimplified, setResultSimplified] = useState(false);
+  /** v2 진행(예정) 카드팩 섹션: 접기 / 간소화 */
+  const [v2PlannedSectionExpanded, setV2PlannedSectionExpanded] = useState(true);
+  const [v2PlannedSectionSimplified, setV2PlannedSectionSimplified] = useState(false);
+  /** 시작·관측 에고기프트: 접기 / 간소화 (2열 그리드와 함께) — 기본은 간소화(컴팩트) 크기 */
+  const [pinnedEgoSectionsExpanded, setPinnedEgoSectionsExpanded] = useState(true);
+  const [pinnedEgoSectionsSimplified, setPinnedEgoSectionsSimplified] = useState(true);
+  /** 보고서 12인격 슬롯 — searchJson.reportPersonalitySlots (REPORT_PERSONALITY_OPTIONS 순서) */
+  const [reportPersonalitySlots, setReportPersonalitySlots] = useState<(ReportPersonalitySlotSaved | null)[]>(() =>
+    emptyReportPersonalitySlots()
+  );
+  /** 보고서 에고선택 슬롯 — searchJson.reportEgoSlots (인격선택과 별도 저장) */
+  const [reportEgoSlots, setReportEgoSlots] = useState<ReportEgoSlotSaved[]>(() => emptyReportEgoSlots());
+  const [personalityPickerSlotIndex, setPersonalityPickerSlotIndex] = useState<number | null>(null);
+  const [personalityPickerList, setPersonalityPickerList] = useState<UserPersonalityListItem[]>([]);
+  const [personalityPickerLoading, setPersonalityPickerLoading] = useState(false);
+  const [personalityPickerError, setPersonalityPickerError] = useState("");
+  const [personalityPickerShowAfter, setPersonalityPickerShowAfter] = useState<Record<number, boolean>>({});
+  const [skillPresetMenuSlotIndex, setSkillPresetMenuSlotIndex] = useState<number | null>(null);
+  const [egoPickerSlotIndex, setEgoPickerSlotIndex] = useState<number | null>(null);
+  const [egoPickerList, setEgoPickerList] = useState<UserPersonalityEgoListItem[]>([]);
+  const [egoPickerLoading, setEgoPickerLoading] = useState(false);
+  const [egoPickerError, setEgoPickerError] = useState("");
+  const [egoPickerSelectedByGrade, setEgoPickerSelectedByGrade] = useState<ReportEgoSlotSaved["selectedByGrade"]>({});
+  const personalitySlotBackfillAttemptedRef = useRef<Set<string>>(new Set());
+  const reportPersonalityInitialRefreshDoneRef = useRef<Set<number>>(new Set());
+  const [reportIdentityTab, setReportIdentityTab] = useState<"personality" | "ego">("personality");
   const [resultEgoGiftViewMode, setResultEgoGiftViewMode] = useState<ResultEgoGiftViewMode>("keyword");
+  const [resultFloatingNavOpen, setResultFloatingNavOpen] = useState(false);
+  const [resultFloatingNavEgoDepthOpen, setResultFloatingNavEgoDepthOpen] = useState(false);
+  const resultFloatingNavRef = useRef<HTMLDivElement | null>(null);
+  /** 본문 `container` 기준 — 넓은 화면에서는 바깥, 좁으면 안쪽에 플로팅 네비 정렬 */
+  const mainContentContainerRef = useRef<HTMLDivElement | null>(null);
+  const [floatingNavLeftPx, setFloatingNavLeftPx] = useState<number | null>(null);
   /** 모아보기: 키워드 순 정렬(켜면 키워드 그룹 순, 끄면 즐겨찾기 순). 등급 정렬과 동시 적용 가능 */
   const [flatSortByKeyword, setFlatSortByKeyword] = useState(false);
   /** 모아보기: 등급 정렬 — 첫 클릭 DESC, 두 번째 ASC, 세 번째 해제 */
@@ -525,13 +1196,88 @@ function FavoritesPageClient() {
     difficultyFloors?: Array<{ difficulty: string; floors: number[] }>;
   }>>([]);
 
+  const applyResultTabUiPrefsFromRecord = useCallback((raw: object) => {
+    const u = parseResultTabUiPrefs(raw as Record<string, unknown>);
+    setResultSimplified(u.resultSimplified);
+    setV2PlannedSectionExpanded(u.v2PlannedSectionExpanded);
+    setV2PlannedSectionSimplified(u.v2PlannedSectionSimplified);
+    setMissedLimitedCardPacksExpanded(u.missedLimitedCardPacksExpanded);
+    setPinnedEgoSectionsExpanded(u.pinnedEgoSectionsExpanded);
+    setPinnedEgoSectionsSimplified(u.pinnedEgoSectionsSimplified);
+  }, []);
+
+  const resetResultTabUiPrefsToDefaults = useCallback(() => {
+    setResultSimplified(false);
+    setV2PlannedSectionExpanded(true);
+    setV2PlannedSectionSimplified(false);
+    setMissedLimitedCardPacksExpanded(true);
+    setPinnedEgoSectionsExpanded(true);
+    setPinnedEgoSectionsSimplified(true);
+  }, []);
+
   const filteredShareBoardPosts = shareBoardPosts;
+  const floatingNavScrollOffset = 124;
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchShareBoardAuth = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/auth/google/me`, {
+          method: "GET",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          if (!cancelled) {
+            setShareBoardAuthenticated(false);
+            setShareBoardAuthChecked(true);
+          }
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setShareBoardAuthenticated(Boolean(data?.authenticated));
+          setShareBoardAuthChecked(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setShareBoardAuthenticated(false);
+          setShareBoardAuthChecked(true);
+        }
+      }
+    };
+    void fetchShareBoardAuth();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const ensureShareBoardRegisterAccess = useCallback(() => {
+    if (!shareBoardAuthChecked) {
+      const message = "로그인 상태를 확인 중입니다. 잠시 후 다시 시도해주세요.";
+      setError(message);
+      if (typeof window !== "undefined") {
+        window.alert(message);
+      }
+      return false;
+    }
+    if (!shareBoardAuthenticated) {
+      const message = "로그인이 필요합니다.";
+      setError(message);
+      if (typeof window !== "undefined") {
+        window.alert(message);
+      }
+      return false;
+    }
+    return true;
+  }, [shareBoardAuthChecked, shareBoardAuthenticated]);
 
   const shareBoardPreviewEgoGiftsExcludingObserved = useMemo(() => {
-    if (shareBoardPreviewObservedEgoGiftIds.length === 0) return shareBoardPreviewEgoGifts;
-    const observedSet = new Set(shareBoardPreviewObservedEgoGiftIds);
-    return shareBoardPreviewEgoGifts.filter((eg) => !observedSet.has(eg.egogiftId));
-  }, [shareBoardPreviewEgoGifts, shareBoardPreviewObservedEgoGiftIds]);
+    if (shareBoardPreviewObservedEgoGiftIds.length === 0 && shareBoardPreviewStartEgoGiftIds.length === 0) {
+      return shareBoardPreviewEgoGifts;
+    }
+    const hiddenSet = new Set([...shareBoardPreviewObservedEgoGiftIds, ...shareBoardPreviewStartEgoGiftIds]);
+    return shareBoardPreviewEgoGifts.filter((eg) => !hiddenSet.has(eg.egogiftId));
+  }, [shareBoardPreviewEgoGifts, shareBoardPreviewObservedEgoGiftIds, shareBoardPreviewStartEgoGiftIds]);
 
   const shareBoardPreviewEgoGiftsByKeyword = useMemo(() => {
     const map = new Map<string, typeof shareBoardPreviewEgoGifts>();
@@ -595,6 +1341,10 @@ function FavoritesPageClient() {
         grades: eg.grades,
         synthesisYn: eg.synthesisYn,
         thumbnail: eg.thumbnail,
+        limitedCategoryNames:
+          Array.isArray(eg.limitedCategoryNames) && eg.limitedCategoryNames.length > 0
+            ? eg.limitedCategoryNames.map((x) => String(x).trim()).filter(Boolean)
+            : undefined,
       }));
   }, [shareBoardPreviewEgoGifts]);
 
@@ -646,6 +1396,97 @@ function FavoritesPageClient() {
     return shareBoardPreviewEgoGiftsFlat.filter((eg) => !shown.has(eg.egogiftId));
   }, [shareBoardPreviewEgoGiftViewMode, shareBoardPreviewEgoGiftsFlat, shareBoardPreviewFloorRows]);
 
+  const shareBoardPreviewPersonalityKeywordCounts = useMemo(() => {
+    const countMap = new Map<string, number>();
+    for (const slot of shareBoardPreviewReportPersonalitySlots) {
+      if (!slot) continue;
+      const uniq = new Set<string>();
+      for (const raw of slot.keywords ?? []) {
+        const keyword = normalizePersonalityKeyword(raw);
+        if (!keyword || !RESULT_KEYWORD_ICON_MAP[keyword]) continue;
+        uniq.add(keyword);
+      }
+      for (const keyword of uniq) countMap.set(keyword, (countMap.get(keyword) ?? 0) + 1);
+    }
+    const ordered = PERSONALITY_MODAL_KEYWORD_ORDER
+      .map((keyword) => ({
+        keyword,
+        iconPath: RESULT_KEYWORD_ICON_MAP[keyword],
+        count: countMap.get(keyword) ?? 0,
+      }))
+      .filter((row) => row.count > 0);
+    const rest = Array.from(countMap.entries())
+      .filter(([keyword]) => !PERSONALITY_MODAL_KEYWORD_ORDER.some((k) => k === keyword))
+      .sort((a, b) => a[0].localeCompare(b[0], "ko"))
+      .map(([keyword, count]) => ({ keyword, iconPath: RESULT_KEYWORD_ICON_MAP[keyword], count }))
+      .filter((row) => row.iconPath);
+    return [...ordered, ...rest];
+  }, [shareBoardPreviewReportPersonalitySlots]);
+
+  const shareBoardPreviewFormationKeywordCounts = useMemo(() => {
+    const countMap = new Map<string, number>();
+    for (const slot of shareBoardPreviewReportPersonalitySlots) {
+      if (!slot || !slot.formationOrder || slot.formationOrder < 1 || slot.formationOrder > 7) continue;
+      const uniq = new Set<string>();
+      for (const raw of slot.keywords ?? []) {
+        const keyword = normalizePersonalityKeyword(raw);
+        if (!keyword || !RESULT_KEYWORD_ICON_MAP[keyword]) continue;
+        uniq.add(keyword);
+      }
+      for (const keyword of uniq) countMap.set(keyword, (countMap.get(keyword) ?? 0) + 1);
+    }
+    const ordered = PERSONALITY_MODAL_KEYWORD_ORDER
+      .map((keyword) => ({
+        keyword,
+        iconPath: RESULT_KEYWORD_ICON_MAP[keyword],
+        count: countMap.get(keyword) ?? 0,
+      }))
+      .filter((row) => row.count > 0);
+    const rest = Array.from(countMap.entries())
+      .filter(([keyword]) => !PERSONALITY_MODAL_KEYWORD_ORDER.some((k) => k === keyword))
+      .sort((a, b) => a[0].localeCompare(b[0], "ko"))
+      .map(([keyword, count]) => ({ keyword, iconPath: RESULT_KEYWORD_ICON_MAP[keyword], count }))
+      .filter((row) => row.iconPath);
+    return [...ordered, ...rest];
+  }, [shareBoardPreviewReportPersonalitySlots]);
+
+  const shareBoardPreviewFormationRound1AcquirableResources = useMemo(
+    () => computeFormationRound1AcquirableResources(shareBoardPreviewReportPersonalitySlots),
+    [shareBoardPreviewReportPersonalitySlots]
+  );
+
+  const shareBoardPreviewEgoResourceCounts = useMemo(() => {
+    const acc: Record<string, number> = {
+      분노: 0,
+      색욕: 0,
+      나태: 0,
+      탐식: 0,
+      우울: 0,
+      오만: 0,
+      질투: 0,
+    };
+    for (const slot of shareBoardPreviewReportEgoSlots) {
+      const selected = slot?.selectedByGrade;
+      if (!selected) continue;
+      for (const grade of REPORT_EGO_GRADE_ORDER) {
+        const picked = selected[grade];
+        if (!picked) continue;
+        acc.분노 += Number(picked.wrathCost ?? 0) || 0;
+        acc.색욕 += Number(picked.lustCost ?? 0) || 0;
+        acc.나태 += Number(picked.slothCost ?? 0) || 0;
+        acc.탐식 += Number(picked.gluttonyCost ?? 0) || 0;
+        acc.우울 += Number(picked.gloomCost ?? 0) || 0;
+        acc.오만 += Number(picked.prideCost ?? 0) || 0;
+        acc.질투 += Number(picked.envyCost ?? 0) || 0;
+      }
+    }
+    return Object.entries(acc).map(([name, value]) => ({
+      name,
+      value,
+      iconPath: EGO_RESOURCE_ICON_MAP[name],
+    }));
+  }, [shareBoardPreviewReportEgoSlots]);
+
   const pushFavoritesRoute = useCallback((updates: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams.toString());
     Object.entries(updates).forEach(([key, value]) => {
@@ -656,12 +1497,107 @@ function FavoritesPageClient() {
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [router, pathname, searchParams]);
 
+  /** 결과/공유 탭: 플로팅 네비를 본문 컨테이너 오른쪽 바깥(여유 시) / 안쪽(좁을 때) */
+  useLayoutEffect(() => {
+    if (activeTab !== "result" && activeTab !== "share-board") return;
+    const el = mainContentContainerRef.current;
+    if (!el) return;
+    const BUTTON_COL_W = 44;
+    const OUT_GAP = 6;
+    const VIEW_MARGIN = 8;
+    const INSIDE_INSET = 10;
+    const update = () => {
+      const cr = el.getBoundingClientRect();
+      const vw = typeof window !== "undefined" ? window.innerWidth : 0;
+      let left = cr.right + OUT_GAP;
+      if (left + BUTTON_COL_W > vw - VIEW_MARGIN) {
+        left = Math.max(VIEW_MARGIN, cr.right - BUTTON_COL_W - INSIDE_INSET);
+      }
+      setFloatingNavLeftPx(left);
+    };
+    update();
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [activeTab]);
+
   useEffect(() => {
     const tab = searchParams.get("tab");
-    if (tab === "egogift" || tab === "result" || tab === "share-board") {
+    if (tab === "egogift") {
+      setActiveTab("result");
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", "result");
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname);
+      return;
+    }
+    if (tab === "result" || tab === "share-board") {
       setActiveTab(tab);
     }
-  }, [searchParams]);
+  }, [searchParams, pathname, router]);
+
+  useEffect(() => {
+    if (!reportEgoGiftSelectModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setReportEgoGiftSelectModalOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [reportEgoGiftSelectModalOpen]);
+
+  const scrollToSection = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.scrollY - floatingNavScrollOffset;
+    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+    setResultFloatingNavOpen(false);
+  }, [floatingNavScrollOffset]);
+
+  const scrollToPageTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  const scrollToPageBottom = useCallback(() => {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    if (!resultFloatingNavOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      const root = resultFloatingNavRef.current;
+      if (!root) return;
+      if (!root.contains(e.target as Node)) {
+        setResultFloatingNavOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [resultFloatingNavOpen]);
+
+  useEffect(() => {
+    if (!resultFloatingNavOpen) {
+      setResultFloatingNavEgoDepthOpen(false);
+    }
+  }, [resultFloatingNavOpen]);
+
+  useEffect(() => {
+    if (activeTab !== "result" && activeTab !== "share-board") {
+      setResultFloatingNavOpen(false);
+      setResultFloatingNavEgoDepthOpen(false);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "result" && selectedFavoriteId === null) {
+      setResultFloatingNavOpen(false);
+      setResultFloatingNavEgoDepthOpen(false);
+    }
+  }, [activeTab, selectedFavoriteId]);
   const [resultStarredCardPacksLoading, setResultStarredCardPacksLoading] = useState(false);
   /** 결과 탭 즐겨찾기 카드팩: 난이도 필터 (저장 시 searchJson.cardPackDifficulty로 저장) */
   const [resultCardPackDifficulty, setResultCardPackDifficulty] = useState<string>("노말");
@@ -795,13 +1731,6 @@ function FavoritesPageClient() {
     const item = items.find((i) => i.favoriteId === selectedFavoriteId);
     const v = item?.schemaVersion;
     return v === 2 ? 2 : 1;
-  }, [selectedFavoriteId, items]);
-
-  /** 스키마 2 이상 보고서 (자동 저장 등) */
-  const favoriteSchemaV2OrHigher = useMemo(() => {
-    if (selectedFavoriteId == null) return false;
-    const item = items.find((i) => i.favoriteId === selectedFavoriteId);
-    return (item?.schemaVersion ?? 1) >= 2;
   }, [selectedFavoriteId, items]);
 
   /** 스키마 v2: 전체 카드팩 목록 (층·난이도 필터는 프론트에서 분류) */
@@ -1018,9 +1947,21 @@ function FavoritesPageClient() {
     missedLimitedLastFetchSnapshotRef.current = null;
   }, [selectedFavoriteId]);
 
-  /** 결과 탭: 관측 후보 = 전체 에고기프트 + 조합식「결과」ID·Ⅳ·EX·synthesisYn 등 제외 */
+  /** 결과 탭: 관측 후보 = 전체 에고기프트 + 조합식「결과」ID·Ⅳ·EX·synthesisYn 등 제외 — 보고서 미선택 시에는 요청하지 않음 */
   useEffect(() => {
-    if (activeTab !== "result") return;
+    if (activeTab !== "result") {
+      observableEgoCatalogFetchedRef.current = false;
+      setObservableEgoGiftCatalog([]);
+      setObservableEgoGiftCatalogLoading(false);
+      return;
+    }
+    if (selectedFavoriteId == null) {
+      setObservableEgoGiftCatalogLoading(false);
+      return;
+    }
+    if (observableEgoCatalogFetchedRef.current) {
+      return;
+    }
     const ac = new AbortController();
     let cancelled = false;
     setObservableEgoGiftCatalogLoading(true);
@@ -1041,6 +1982,10 @@ function FavoritesPageClient() {
             const grades = Array.isArray(rawGrades)
               ? rawGrades.map((x: unknown) => String(x).trim().toUpperCase()).filter(Boolean)
               : undefined;
+            const rawLimited = item.limitedCategoryNames ?? item.limited_category_names;
+            const limitedCategoryNames = Array.isArray(rawLimited)
+              ? rawLimited.map((x: unknown) => String(x ?? "").trim()).filter(Boolean)
+              : undefined;
             return {
               egogiftId: Number(item.egogiftId),
               giftName: String(item.giftName ?? "").trim(),
@@ -1049,6 +1994,7 @@ function FavoritesPageClient() {
               synthesisYn,
               grades: grades?.length ? grades : undefined,
               thumbnail: item.thumbnail ?? item.thumbnail_path,
+              limitedCategoryNames: limitedCategoryNames?.length ? limitedCategoryNames : undefined,
             };
           })
           .filter(
@@ -1058,23 +2004,32 @@ function FavoritesPageClient() {
               isObservableEgoGiftCandidate(x.giftTier, x.synthesisYn, x.egogiftId, recipeResultIds),
           );
         setObservableEgoGiftCatalog(items);
+        observableEgoCatalogFetchedRef.current = true;
       })
       .catch(() => {
-        if (!cancelled) setObservableEgoGiftCatalog([]);
+        if (!cancelled) {
+          setObservableEgoGiftCatalog([]);
+          observableEgoCatalogFetchedRef.current = false;
+        }
       })
       .finally(() => {
-        setObservableEgoGiftCatalogLoading(false);
+        if (!cancelled) setObservableEgoGiftCatalogLoading(false);
       });
     return () => {
       cancelled = true;
       ac.abort();
     };
-  }, [activeTab]);
+  }, [activeTab, selectedFavoriteId]);
 
   /** 카탈로그 갱신 시: 목록에 없는 ID·4슬롯 초과 제거 */
   useEffect(() => {
     if (observableEgoGiftCatalog.length === 0) return;
     const allowed = new Set(observableEgoGiftCatalog.map((c) => c.egogiftId));
+    setStartEgoGiftIds((prev) => {
+      const next = prev.filter((id) => allowed.has(id)).slice(0, 3);
+      if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
+      return next;
+    });
     setObservedEgoGiftIds((prev) => {
       const next = prev.filter((id) => allowed.has(id)).slice(0, 3);
       if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
@@ -1508,11 +2463,36 @@ function FavoritesPageClient() {
     await captureCardPackListRegionAsImage(v2PlannedCardPacksSectionRef.current, "진행예정카드팩목록");
   }, [captureCardPackListRegionAsImage]);
 
+  const captureReportIdentitySectionAsImage = useCallback(async () => {
+    const el = reportIdentitySectionRef.current;
+    if (!el || typeof window === "undefined") return;
+    const favoriteTitle = getFavoriteTitle();
+    const tabLabel = reportIdentityTab === "ego" ? "E.G.O선택" : "인격선택";
+    const dateStr = (() => {
+      const d = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    })();
+    const baseName = `${favoriteTitle}_인격EGO선택_${tabLabel}_${dateStr}.png`;
+
+    try {
+      const restoreImgs = await inlineExternalImagesForCapture(el);
+      try {
+        const dataUrl = await snapshotElementToPngDataUrl(el, { expandToScrollHeight: true });
+        downloadPngDataUrl(baseName, dataUrl);
+      } finally {
+        restoreImgs();
+      }
+    } catch (err) {
+      console.error("인격/E.G.O 선택 영역 캡처 실패:", formatCaptureError(err), err);
+    }
+  }, [getFavoriteTitle, reportIdentityTab]);
+
   const resultEgoGiftsExcludingObserved = useMemo(() => {
-    if (observedEgoGiftIds.length === 0) return resultEgoGifts;
-    const observedSet = new Set(observedEgoGiftIds);
-    return resultEgoGifts.filter((eg) => !observedSet.has(eg.egogiftId));
-  }, [resultEgoGifts, observedEgoGiftIds]);
+    if (observedEgoGiftIds.length === 0 && startEgoGiftIds.length === 0) return resultEgoGifts;
+    const hiddenSet = new Set([...observedEgoGiftIds, ...startEgoGiftIds]);
+    return resultEgoGifts.filter((eg) => !hiddenSet.has(eg.egogiftId));
+  }, [resultEgoGifts, observedEgoGiftIds, startEgoGiftIds]);
 
   const resultEgoGiftsByKeyword = useMemo(() => {
     const map = new Map<string, typeof resultEgoGifts>();
@@ -1697,8 +2677,8 @@ function FavoritesPageClient() {
     let cancelled = false;
     setFloorLimitedRowsLoading(true);
     void (async () => {
-      const built = await Promise.all(
-        floors.map(async (floor) => {
+      const floorRequests = floors
+        .map((floor) => {
           const packId = checkedCardPackByFloor[floor];
           if (!packId) return null;
           let difficulties: string[];
@@ -1709,41 +2689,53 @@ function FavoritesPageClient() {
             const allowed = MODAL_DIFFICULTY_ALLOWED[resultCardPackDifficulty];
             difficulties = allowed?.length ? [...allowed] : ["노말"];
           }
-          const matched: ResultEgoGiftItem[] = [];
-          try {
-            const difficultyParams = difficulties.map((d) => `difficulties=${encodeURIComponent(d)}`).join("&");
-            const egogiftParams = limited.map((eg) => `egogiftIds=${eg.egogiftId}`).join("&");
-            const query = `${difficultyParams}&floor=${floor}&${egogiftParams}`;
-            const res = await fetch(
-              `${API_BASE_URL}/user/cardpack/for-limited-starred-egogifts-by-ego?${query}`,
-              { credentials: "include" },
-            );
-            if (res.ok) {
-              const data = (await res.json()) as {
-                byEgogiftId?: Record<string, { cardpackId?: unknown }[]>;
-              };
-              const byEgo = data.byEgogiftId ?? {};
-              for (const eg of limited) {
-                const items = byEgo[String(eg.egogiftId)] ?? [];
-                if (items.some((item) => Number(item.cardpackId) === packId)) {
-                  matched.push(eg);
-                }
-              }
-            }
-          } catch {
-            /* skip */
-          }
-          matched.sort((a, b) => a.egogiftId - b.egogiftId);
-          const meta = resolveCardPackMetaForFloor(packId);
-          return {
-            floor,
-            cardpackId: packId,
-            title: meta.title,
-            limitedEgoGifts: matched,
-            ...(meta.thumbnail != null && meta.thumbnail !== "" ? { thumbnail: meta.thumbnail } : {}),
-          };
+          return { floor, difficulties };
         })
-      );
+        .filter((row): row is { floor: number; difficulties: string[] } => row != null);
+
+      let byFloor: Record<string, Record<string, { cardpackId?: unknown }[]>> = {};
+      try {
+        const res = await fetch(`${API_BASE_URL}/user/cardpack/for-limited-starred-egogifts-by-floor-batch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            floorRequests,
+            egogiftIds: limited.map((eg) => eg.egogiftId),
+            excludeCardpackIds: [],
+          }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            byFloor?: Record<string, Record<string, { cardpackId?: unknown }[]>>;
+          };
+          byFloor = data.byFloor ?? {};
+        }
+      } catch {
+        byFloor = {};
+      }
+
+      const built = floorRequests.map(({ floor }) => {
+        const packId = checkedCardPackByFloor[floor];
+        if (!packId) return null;
+        const byEgo = byFloor[String(floor)] ?? {};
+        const matched: ResultEgoGiftItem[] = [];
+        for (const eg of limited) {
+          const items = byEgo[String(eg.egogiftId)] ?? [];
+          if (items.some((item) => Number(item.cardpackId) === packId)) {
+            matched.push(eg);
+          }
+        }
+        matched.sort((a, b) => a.egogiftId - b.egogiftId);
+        const meta = resolveCardPackMetaForFloor(packId);
+        return {
+          floor,
+          cardpackId: packId,
+          title: meta.title,
+          limitedEgoGifts: matched,
+          ...(meta.thumbnail != null && meta.thumbnail !== "" ? { thumbnail: meta.thumbnail } : {}),
+        };
+      });
       const rows = built.filter((row) => row != null);
       rows.sort((a, b) => a.floor - b.floor);
       if (!cancelled) {
@@ -1765,30 +2757,12 @@ function FavoritesPageClient() {
     resolveCardPackMetaForFloor,
   ]);
 
-  // 저장 완료 토스트: 막 보일 때 한 번만 아래로 내려오기
+  // 저장 실패 토스트: 잠시 후 제거
   useEffect(() => {
-    if (saveToastState === "visible" && !toastSlideDown) {
-      const t = requestAnimationFrame(() => {
-        requestAnimationFrame(() => setToastSlideDown(true));
-      });
-      return () => cancelAnimationFrame(t);
-    }
-  }, [saveToastState, toastSlideDown]);
-
-  // 저장 완료 토스트: visible 시 2.5초 후 올라가며 사라짐
-  useEffect(() => {
-    if (saveToastState === "visible") {
-      const downTimer = setTimeout(() => setSaveToastState("exiting"), 2500);
-      return () => clearTimeout(downTimer);
-    }
-    if (saveToastState === "exiting") {
-      const upTimer = setTimeout(() => {
-        setSaveToastState("hidden");
-        setToastSlideDown(false);
-      }, 350);
-      return () => clearTimeout(upTimer);
-    }
-  }, [saveToastState]);
+    if (!saveFailureToastMessage) return;
+    const t = setTimeout(() => setSaveFailureToastMessage(null), 3500);
+    return () => clearTimeout(t);
+  }, [saveFailureToastMessage]);
 
   // 공유 링크 복사 토스트: 2초 후 제거
   useEffect(() => {
@@ -1836,7 +2810,7 @@ function FavoritesPageClient() {
     if (!trimmed) return;
     const uuid = getOrCreateUUID();
     if (!uuid) {
-      setError("UUID를 생성할 수 없습니다.");
+      setSaveFailureToastMessage("UUID를 생성할 수 없습니다.");
       return;
     }
     const titleToSave = getUniqueReportTitle(trimmed, items);
@@ -1848,7 +2822,10 @@ function FavoritesPageClient() {
       cardPackCheckedByFloor: {} as Record<string, number>,
       plannedCardPackDifficultyByFloor: {} as Record<string, string>,
       plannedFloorRowCount: 1,
+      startEgoGiftIds: [] as number[],
       observedEgoGiftIds: [] as number[],
+      reportPersonalitySlots: emptyReportPersonalitySlots(),
+      reportEgoSlots: emptyReportEgoSlots(),
     };
     const payload = { searchJson: JSON.stringify(merged) };
     setRegistering(true);
@@ -1871,29 +2848,26 @@ function FavoritesPageClient() {
         setV2PlannedFloorRowCount(1);
         setCheckedEgoGiftIds([]);
         setResultEgoGiftViewMode("keyword");
+        setStartEgoGiftIds([]);
         setObservedEgoGiftIds([]);
+        setReportPersonalitySlots(emptyReportPersonalitySlots());
+        setReportEgoSlots(emptyReportEgoSlots());
         setSelectedFavoriteId(null);
+        resetResultTabUiPrefsToDefaults();
         await fetchFavorites();
-        setToastSlideDown(false);
-        setSaveToastState("visible");
       } else {
-        setError(data.message ?? "등록에 실패했습니다.");
+        setSaveFailureToastMessage(data.message ?? "등록에 실패했습니다.");
       }
     } catch {
-      setError("등록에 실패했습니다.");
+      setSaveFailureToastMessage("등록에 실패했습니다.");
     } finally {
       setRegistering(false);
     }
   };
 
-  /** 선택된 즐겨찾기 전체 저장 (상단 저장 버튼·스키마 v2+ 자동 저장) */
-  const handleSave = useCallback(async () => {
-    if (selectedFavoriteId === null) return;
-    const uuid = getOrCreateUUID();
-    if (!uuid) {
-      setError("UUID를 생성할 수 없습니다.");
-      return;
-    }
+  /** 결과 탭 보고서 JSON — handleSave·자동 저장 스킵 판별에서 동일 규칙으로 사용 */
+  const computeReportFavoriteSaveSearchJson = useCallback((): string | null => {
+    if (selectedFavoriteId === null) return null;
     const existing = items.find((i) => i.favoriteId === selectedFavoriteId);
     let parsed: {
       title?: string;
@@ -1904,9 +2878,12 @@ function FavoritesPageClient() {
       plannedCardPackDifficultyByFloor?: Record<string, string>;
       plannedFloorRowCount?: number;
       checkedEgoGiftIds?: number[];
+      startEgoGiftIds?: number[];
       observedEgoGiftIds?: number[];
       resultEgoGiftViewByKeyword?: boolean;
       resultEgoGiftViewMode?: string;
+      reportPersonalitySlots?: unknown;
+      reportEgoSlots?: unknown;
     } = {};
     if (existing) {
       try {
@@ -1928,36 +2905,23 @@ function FavoritesPageClient() {
       ),
       plannedFloorRowCount: v2PlannedFloorRowCount,
       checkedEgoGiftIds: checkedEgoGiftIds,
+      startEgoGiftIds: startEgoGiftIds.slice(0, 3),
       observedEgoGiftIds: observedEgoGiftIds.slice(0, 3),
       ...(resultEgoGiftViewMode === "keyword"
         ? {}
         : resultEgoGiftViewMode === "flat"
           ? { resultEgoGiftViewByKeyword: false }
           : { resultEgoGiftViewByKeyword: false, resultEgoGiftViewMode: "floor" }),
+      reportPersonalitySlots,
+      reportEgoSlots,
+      resultSimplified,
+      v2PlannedSectionExpanded,
+      v2PlannedSectionSimplified,
+      missedLimitedCardPacksExpanded,
+      pinnedEgoSectionsExpanded,
+      pinnedEgoSectionsSimplified,
     };
-    const payload = { searchJson: JSON.stringify(merged) };
-    setRegistering(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/user/favorite-search/${selectedFavoriteId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "X-User-UUID": uuid },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.success) {
-        await fetchFavorites();
-        setToastSlideDown(false);
-        setSaveToastState("visible");
-      } else {
-        setError(data.message ?? "저장에 실패했습니다.");
-      }
-    } catch {
-      setError("저장에 실패했습니다.");
-    } finally {
-      setRegistering(false);
-    }
+    return JSON.stringify(merged);
   }, [
     selectedFavoriteId,
     items,
@@ -1969,47 +2933,544 @@ function FavoritesPageClient() {
     plannedCardPackDifficultyByFloor,
     v2PlannedFloorRowCount,
     checkedEgoGiftIds,
+    startEgoGiftIds,
     observedEgoGiftIds,
     resultEgoGiftViewMode,
-    fetchFavorites,
+    reportPersonalitySlots,
+    reportEgoSlots,
+    resultSimplified,
+    v2PlannedSectionExpanded,
+    v2PlannedSectionSimplified,
+    missedLimitedCardPacksExpanded,
+    pinnedEgoSectionsExpanded,
+    pinnedEgoSectionsSimplified,
   ]);
+
+  /** 선택된 즐겨찾기 전체 저장 (상단 저장 버튼·결과 탭 자동 저장) */
+  const handleSave = useCallback(async (options?: { refreshList?: boolean }) => {
+    const shouldRefreshList = options?.refreshList ?? true;
+    if (selectedFavoriteId === null) return;
+    const uuid = getOrCreateUUID();
+    if (!uuid) {
+      setSaveFailureToastMessage("UUID를 생성할 수 없습니다.");
+      return;
+    }
+    const searchJson = computeReportFavoriteSaveSearchJson();
+    if (searchJson == null) return;
+    const payload = { searchJson };
+    setRegistering(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/user/favorite-search/${selectedFavoriteId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-User-UUID": uuid },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (shouldRefreshList) {
+          await fetchFavorites();
+        } else {
+          setItems((prev) =>
+            prev.map((item) =>
+              item.favoriteId === selectedFavoriteId
+                ? { ...item, searchJson: payload.searchJson }
+                : item
+            )
+          );
+        }
+      } else {
+        setSaveFailureToastMessage(data.message ?? "저장에 실패했습니다.");
+      }
+    } catch {
+      setSaveFailureToastMessage("저장에 실패했습니다.");
+    } finally {
+      setRegistering(false);
+    }
+  }, [selectedFavoriteId, computeReportFavoriteSaveSearchJson, fetchFavorites]);
 
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
 
+  const openPersonalityPicker = useCallback(async (slotIndex: number) => {
+    if (slotIndex < 0 || slotIndex >= REPORT_PERSONALITY_OPTIONS.length) return;
+    setPersonalityPickerSlotIndex(slotIndex);
+    setPersonalityPickerShowAfter({});
+    setPersonalityPickerLoading(true);
+    setPersonalityPickerError("");
+    setPersonalityPickerList([]);
+    const order = REPORT_PERSONALITY_OPTIONS[slotIndex].order;
+    try {
+      const list = await fetchUserPersonalityList(order);
+      const sorted = [...list].sort((a, b) => {
+        const ga = Number(a.grade) || 0;
+        const gb = Number(b.grade) || 0;
+        if (ga !== gb) return ga - gb;
+        return String(a.name ?? "").localeCompare(String(b.name ?? ""), "ko");
+      });
+      setPersonalityPickerList(sorted);
+    } catch {
+      setPersonalityPickerError("인격 목록을 불러오지 못했습니다.");
+    } finally {
+      setPersonalityPickerLoading(false);
+    }
+  }, []);
+
+  const applyPersonalityFromPicker = useCallback(
+    (slotIndex: number, row: UserPersonalityListItem, useAfterThumb: boolean) => {
+      const beforePath = extractPathFromUnknownImage(row.beforeSyncImage);
+      const afterPath = extractPathFromUnknownImage(row.afterSyncImage);
+      const path =
+        (useAfterThumb ? afterPath : beforePath) ||
+        beforePath ||
+        afterPath ||
+        "";
+      const normalizedKeywords = (row.keywords ?? [])
+        .map((k) => String(k ?? "").trim())
+        .filter(Boolean);
+      setReportPersonalitySlots((prev) => {
+        const next = [...prev];
+        const prevFormationOrder = next[slotIndex]?.formationOrder ?? null;
+        next[slotIndex] = {
+          personalityId: row.personalityId,
+          name: row.name.trim() || "이름 없음",
+          grade: row.grade,
+          imagePath: path,
+          keywords: normalizedKeywords,
+          beforeSyncImagePath: beforePath,
+          afterSyncImagePath: afterPath,
+          useAfterSyncImage: useAfterThumb,
+          formationOrder: prevFormationOrder,
+          skillAttributes: (row.skillAttributes ?? []).slice(0, 3),
+          skillAttackTypes: (row.skillAttackTypes ?? []).slice(0, 3),
+          skillInputValues: ["3", "2", "1"],
+        };
+        return next;
+      });
+      setPersonalityPickerSlotIndex(null);
+    },
+    []
+  );
+
+  const clearPersonalityFromPicker = useCallback(() => {
+    if (personalityPickerSlotIndex == null) return;
+    setReportPersonalitySlots((prev) => {
+      const next = [...prev];
+      const removedOrder = next[personalityPickerSlotIndex]?.formationOrder ?? null;
+      next[personalityPickerSlotIndex] = null;
+      if (removedOrder != null) {
+        for (let i = 0; i < next.length; i += 1) {
+          const slot = next[i];
+          if (!slot?.formationOrder) continue;
+          if (slot.formationOrder > removedOrder) {
+            next[i] = { ...slot, formationOrder: slot.formationOrder - 1 };
+          }
+        }
+      }
+      return next;
+    });
+    setPersonalityPickerSlotIndex(null);
+  }, [personalityPickerSlotIndex]);
+
+  const openEgoPicker = useCallback(async (slotIndex: number) => {
+    if (slotIndex < 0 || slotIndex >= REPORT_PERSONALITY_OPTIONS.length) return;
+    setEgoPickerSlotIndex(slotIndex);
+    setEgoPickerLoading(true);
+    setEgoPickerError("");
+    setEgoPickerList([]);
+    const current = reportEgoSlots[slotIndex]?.selectedByGrade ?? {};
+    setEgoPickerSelectedByGrade({ ...current });
+    const order = REPORT_PERSONALITY_OPTIONS[slotIndex].order;
+    try {
+      const list = await fetchUserPersonalityEgoList(order);
+      setEgoPickerList(list);
+    } catch {
+      setEgoPickerError("에고 목록을 불러오지 못했습니다.");
+    } finally {
+      setEgoPickerLoading(false);
+    }
+  }, [reportEgoSlots]);
+
+  const toggleEgoPickerSelection = useCallback((row: UserPersonalityEgoListItem) => {
+    const grade = String(row.libraryGrade ?? "").trim().toUpperCase() as keyof ReportEgoSlotSaved["selectedByGrade"];
+    if (!REPORT_EGO_GRADE_ORDER.includes(grade as any)) return;
+    const imagePath = extractPathFromUnknownImage(row.image);
+    setEgoPickerSelectedByGrade((prev) => {
+      const next = { ...prev };
+      if (next[grade]?.egoId === row.egoId) {
+        delete next[grade];
+      } else {
+        next[grade] = {
+          egoId: row.egoId,
+          title: String(row.title ?? "").trim() || "이름 없음",
+          libraryGrade: grade,
+          imagePath,
+          wrathCost: Number(row.wrathCost ?? 0) || 0,
+          lustCost: Number(row.lustCost ?? 0) || 0,
+          slothCost: Number(row.slothCost ?? 0) || 0,
+          gluttonyCost: Number(row.gluttonyCost ?? 0) || 0,
+          gloomCost: Number(row.gloomCost ?? 0) || 0,
+          prideCost: Number(row.prideCost ?? 0) || 0,
+          envyCost: Number(row.envyCost ?? 0) || 0,
+        };
+      }
+      return next;
+    });
+  }, []);
+
+  const clearAllEgoPickerSelection = useCallback(() => {
+    setEgoPickerSelectedByGrade({});
+  }, []);
+
+  const applyEgoPickerSelection = useCallback(() => {
+    if (egoPickerSlotIndex == null) return;
+    setReportEgoSlots((prev) => {
+      const next = [...prev];
+      next[egoPickerSlotIndex] = { selectedByGrade: { ...egoPickerSelectedByGrade } };
+      return next;
+    });
+    setEgoPickerSlotIndex(null);
+  }, [egoPickerSelectedByGrade, egoPickerSlotIndex]);
+
+  useEffect(() => {
+    if (selectedFavoriteId == null) return;
+    const attemptKeyPrefix = `${selectedFavoriteId}:`;
+    const needsBackfill = reportPersonalitySlots.some((slot) => {
+      if (!slot) return false;
+      const attemptKey = `${attemptKeyPrefix}${slot.personalityId}`;
+      if (personalitySlotBackfillAttemptedRef.current.has(attemptKey)) return false;
+      const hasKeywords = Array.isArray(slot.keywords);
+      const hasSyncPaths = Boolean(slot.beforeSyncImagePath) || Boolean(slot.afterSyncImagePath);
+      return !hasKeywords || !hasSyncPaths;
+    });
+    if (!needsBackfill) return;
+    let cancelled = false;
+    (async () => {
+      const cache = new Map<number, UserPersonalityListItem[]>();
+      const next = [...reportPersonalitySlots];
+      let changed = false;
+      for (let slotIndex = 0; slotIndex < REPORT_PERSONALITY_OPTIONS.length; slotIndex += 1) {
+        const slot = next[slotIndex];
+        if (!slot?.personalityId) continue;
+        const attemptKey = `${attemptKeyPrefix}${slot.personalityId}`;
+        if (personalitySlotBackfillAttemptedRef.current.has(attemptKey)) continue;
+        const hasKeywords = Array.isArray(slot.keywords);
+        const hasBefore = Boolean(slot.beforeSyncImagePath);
+        const hasAfter = Boolean(slot.afterSyncImagePath);
+        if (hasKeywords && (hasBefore || hasAfter)) {
+          personalitySlotBackfillAttemptedRef.current.add(attemptKey);
+          continue;
+        }
+        const order = REPORT_PERSONALITY_OPTIONS[slotIndex].order;
+        if (!cache.has(order)) {
+          try {
+            cache.set(order, await fetchUserPersonalityList(order));
+          } catch {
+            cache.set(order, []);
+          }
+        }
+        personalitySlotBackfillAttemptedRef.current.add(attemptKey);
+        const list = cache.get(order) ?? [];
+        const found = list.find((r) => r.personalityId === slot.personalityId);
+        if (!found) continue;
+        const normalizedKeywords = (found.keywords ?? [])
+          .map((k) => String(k ?? "").trim())
+          .filter(Boolean);
+        const beforePath = extractPathFromUnknownImage(found.beforeSyncImage);
+        const afterPath = extractPathFromUnknownImage(found.afterSyncImage);
+        const syncedPath = (slot.useAfterSyncImage !== false ? afterPath : beforePath) || beforePath || afterPath;
+        const mergedSlot: ReportPersonalitySlotSaved = {
+          ...slot,
+          keywords: normalizedKeywords,
+          skillAttributes: (found.skillAttributes ?? []).slice(0, 3),
+          skillAttackTypes: (found.skillAttackTypes ?? []).slice(0, 3),
+          beforeSyncImagePath: beforePath || slot.beforeSyncImagePath || "",
+          afterSyncImagePath: afterPath || slot.afterSyncImagePath || "",
+          imagePath: slot.imagePath || syncedPath || slot.imagePath,
+          useAfterSyncImage:
+            slot.useAfterSyncImage ?? (afterPath ? true : slot.useAfterSyncImage),
+        };
+        const prevSerialized = JSON.stringify(slot);
+        const nextSerialized = JSON.stringify(mergedSlot);
+        if (prevSerialized !== nextSerialized) {
+          next[slotIndex] = mergedSlot;
+          changed = true;
+        }
+      }
+      if (!cancelled && changed) {
+        setReportPersonalitySlots(next);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFavoriteId, reportPersonalitySlots]);
+
+  const reportPersonalityKeywordCounts = useMemo(() => {
+    const countMap = new Map<string, number>();
+    for (const slot of reportPersonalitySlots) {
+      if (!slot) continue;
+      const uniq = new Set<string>();
+      for (const raw of slot.keywords ?? []) {
+        const keyword = normalizePersonalityKeyword(raw);
+        if (!keyword || !RESULT_KEYWORD_ICON_MAP[keyword]) continue;
+        uniq.add(keyword);
+      }
+      for (const keyword of uniq) {
+        countMap.set(keyword, (countMap.get(keyword) ?? 0) + 1);
+      }
+    }
+    const ordered = PERSONALITY_MODAL_KEYWORD_ORDER
+      .map((keyword) => ({
+        keyword,
+        iconPath: RESULT_KEYWORD_ICON_MAP[keyword],
+        count: countMap.get(keyword) ?? 0,
+      }))
+      .filter((row) => row.count > 0);
+    const rest = Array.from(countMap.entries())
+      .filter(([keyword]) => !PERSONALITY_MODAL_KEYWORD_ORDER.some((k) => k === keyword))
+      .sort((a, b) => a[0].localeCompare(b[0], "ko"))
+      .map(([keyword, count]) => ({
+        keyword,
+        iconPath: RESULT_KEYWORD_ICON_MAP[keyword],
+        count,
+      }))
+      .filter((row) => row.iconPath);
+    return [...ordered, ...rest];
+  }, [reportPersonalitySlots]);
+  const reportPersonalityFormationKeywordCounts = useMemo(() => {
+    const countMap = new Map<string, number>();
+    for (const slot of reportPersonalitySlots) {
+      if (!slot || !slot.formationOrder || slot.formationOrder < 1 || slot.formationOrder > 7) continue;
+      const uniq = new Set<string>();
+      for (const raw of slot.keywords ?? []) {
+        const keyword = normalizePersonalityKeyword(raw);
+        if (!keyword || !RESULT_KEYWORD_ICON_MAP[keyword]) continue;
+        uniq.add(keyword);
+      }
+      for (const keyword of uniq) {
+        countMap.set(keyword, (countMap.get(keyword) ?? 0) + 1);
+      }
+    }
+    const ordered = PERSONALITY_MODAL_KEYWORD_ORDER
+      .map((keyword) => ({
+        keyword,
+        iconPath: RESULT_KEYWORD_ICON_MAP[keyword],
+        count: countMap.get(keyword) ?? 0,
+      }))
+      .filter((row) => row.count > 0);
+    const rest = Array.from(countMap.entries())
+      .filter(([keyword]) => !PERSONALITY_MODAL_KEYWORD_ORDER.some((k) => k === keyword))
+      .sort((a, b) => a[0].localeCompare(b[0], "ko"))
+      .map(([keyword, count]) => ({
+        keyword,
+        iconPath: RESULT_KEYWORD_ICON_MAP[keyword],
+        count,
+      }))
+      .filter((row) => row.iconPath);
+    return [...ordered, ...rest];
+  }, [reportPersonalitySlots]);
+  const reportFormationRound1AcquirableResources = useMemo(
+    () => computeFormationRound1AcquirableResources(reportPersonalitySlots),
+    [reportPersonalitySlots]
+  );
+  const reportEgoResourceCounts = useMemo(() => {
+    const acc: Record<string, number> = {
+      분노: 0,
+      색욕: 0,
+      나태: 0,
+      탐식: 0,
+      우울: 0,
+      오만: 0,
+      질투: 0,
+    };
+    for (const slot of reportEgoSlots) {
+      const selected = slot?.selectedByGrade;
+      if (!selected) continue;
+      for (const grade of REPORT_EGO_GRADE_ORDER) {
+        const picked = selected[grade];
+        if (!picked) continue;
+        acc.분노 += Number(picked.wrathCost ?? 0) || 0;
+        acc.색욕 += Number(picked.lustCost ?? 0) || 0;
+        acc.나태 += Number(picked.slothCost ?? 0) || 0;
+        acc.탐식 += Number(picked.gluttonyCost ?? 0) || 0;
+        acc.우울 += Number(picked.gloomCost ?? 0) || 0;
+        acc.오만 += Number(picked.prideCost ?? 0) || 0;
+        acc.질투 += Number(picked.envyCost ?? 0) || 0;
+      }
+    }
+    return Object.entries(acc).map(([name, value]) => ({
+      name,
+      value,
+      iconPath: EGO_RESOURCE_ICON_MAP[name],
+    }));
+  }, [reportEgoSlots]);
+  /** 인격 슬롯 키워드 초기 갱신: 보고서·결과 탭 전환 시 한 번만 (reportPersonalitySlots 의존 시 슬롯 변경마다 반복 실행됨) */
+  useEffect(() => {
+    if (selectedFavoriteId == null || activeTab !== "result") return;
+    if (reportPersonalityInitialRefreshDoneRef.current.has(selectedFavoriteId)) return;
+    const hasPersonality = reportPersonalitySlots.some((slot) => slot?.personalityId);
+    if (!hasPersonality) return;
+    reportPersonalityInitialRefreshDoneRef.current.add(selectedFavoriteId);
+    let cancelled = false;
+    (async () => {
+      const cache = new Map<number, UserPersonalityListItem[]>();
+      const next = [...reportPersonalitySlots];
+      let changed = false;
+      for (let slotIndex = 0; slotIndex < REPORT_PERSONALITY_OPTIONS.length; slotIndex += 1) {
+        const slot = next[slotIndex];
+        if (!slot?.personalityId) continue;
+        const order = REPORT_PERSONALITY_OPTIONS[slotIndex].order;
+        if (!cache.has(order)) {
+          try {
+            cache.set(order, await fetchUserPersonalityList(order));
+          } catch {
+            cache.set(order, []);
+          }
+        }
+        const found = (cache.get(order) ?? []).find((r) => r.personalityId === slot.personalityId);
+        if (!found) continue;
+        const latestKeywords = (found.keywords ?? [])
+          .map((kw) => String(kw ?? "").trim())
+          .filter(Boolean);
+        const latestAttrs = (found.skillAttributes ?? []).slice(0, 3);
+        const latestAttackTypes = (found.skillAttackTypes ?? []).slice(0, 3);
+        const prevKeywords = (slot.keywords ?? [])
+          .map((kw) => String(kw ?? "").trim())
+          .filter(Boolean);
+        const prevAttrs = (slot.skillAttributes ?? []).slice(0, 3);
+        const prevAttackTypes = (slot.skillAttackTypes ?? []).slice(0, 3);
+        if (
+          JSON.stringify(latestKeywords) !== JSON.stringify(prevKeywords) ||
+          JSON.stringify(latestAttrs) !== JSON.stringify(prevAttrs) ||
+          JSON.stringify(latestAttackTypes) !== JSON.stringify(prevAttackTypes)
+        ) {
+          next[slotIndex] = {
+            ...slot,
+            keywords: latestKeywords,
+            skillAttributes: latestAttrs,
+            skillAttackTypes: latestAttackTypes,
+          };
+          changed = true;
+        }
+      }
+      if (!cancelled && changed) {
+        setReportPersonalitySlots(next);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 초기 스냅샷만 사용 (reportPersonalitySlots 넣지 않음)
+  }, [selectedFavoriteId, activeTab]);
+
+  const egoPickerGroupedByGrade = useMemo(() => {
+    const map: Record<string, UserPersonalityEgoListItem[]> = {};
+    for (const grade of REPORT_EGO_GRADE_ORDER) map[grade] = [];
+    for (const row of egoPickerList) {
+      const grade = String(row.libraryGrade ?? "").trim().toUpperCase();
+      if (!map[grade]) map[grade] = [];
+      map[grade].push(row);
+    }
+    return map;
+  }, [egoPickerList]);
+  const activeReportIdentitySlots = reportPersonalitySlots;
+
+  const applyReportSlotSyncThumb = useCallback(
+    (slotIndex: number, useAfterThumb: boolean) => {
+      setReportPersonalitySlots((prev) => {
+        const next = [...prev];
+        const cur = next[slotIndex];
+        if (!cur) return prev;
+        const beforePath = cur.beforeSyncImagePath ?? "";
+        const afterPath = cur.afterSyncImagePath ?? "";
+        const path = (useAfterThumb ? afterPath : beforePath) || beforePath || afterPath || cur.imagePath;
+        next[slotIndex] = {
+          ...cur,
+          imagePath: path,
+          useAfterSyncImage: useAfterThumb,
+        };
+        return next;
+      });
+    },
+    []
+  );
+
+  const toggleFormationForSlot = useCallback(
+    (slotIndex: number) => {
+      setReportPersonalitySlots((prev) => {
+        const next = [...prev];
+        const cur = next[slotIndex];
+        if (!cur) return prev;
+        const currentOrder = cur.formationOrder ?? null;
+        if (currentOrder == null) {
+          const maxOrder = next.reduce((max, slot) => {
+            const n = slot?.formationOrder ?? 0;
+            return n > max ? n : max;
+          }, 0);
+          const newOrder = Math.min(12, maxOrder + 1);
+          next[slotIndex] = { ...cur, formationOrder: newOrder };
+          return next;
+        }
+        next[slotIndex] = { ...cur, formationOrder: null };
+        for (let i = 0; i < next.length; i += 1) {
+          const slot = next[i];
+          if (!slot?.formationOrder) continue;
+          if (slot.formationOrder > currentOrder) {
+            next[i] = { ...slot, formationOrder: slot.formationOrder - 1 };
+          }
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const resetFormationOrders = useCallback(() => {
+    if (reportIdentityTab === "ego") return;
+    setReportPersonalitySlots((prev) => prev.map((slot) => (slot ? { ...slot, formationOrder: null } : null)));
+  }, [reportIdentityTab]);
+
+  const clearAllIdentitySlots = useCallback(() => {
+    if (reportIdentityTab === "ego") {
+      setReportEgoSlots(emptyReportEgoSlots());
+    } else {
+      setReportPersonalitySlots(emptyReportPersonalitySlots());
+    }
+  }, [reportIdentityTab]);
+
+  useEffect(() => {
+    if (skillPresetMenuSlotIndex == null) return;
+    const close = () => setSkillPresetMenuSlotIndex(null);
+    window.addEventListener("scroll", close, true);
+    return () => window.removeEventListener("scroll", close, true);
+  }, [skillPresetMenuSlotIndex]);
+
   const prevTabForV2AutosaveRef = useRef(activeTab);
   useEffect(() => {
     if (prevTabForV2AutosaveRef.current !== "result" && activeTab === "result") {
-      v2AutosaveSkipNextRef.current = true;
+      reportAutosaveSkipNextRef.current = true;
     }
     prevTabForV2AutosaveRef.current = activeTab;
   }, [activeTab]);
 
-  /** 스키마 v2 이상 + 결과 탭: 층별 카드팩·에고기프트 목록 등 변경 시 자동 저장 (handleSave는 ref로 호출해 저장 후 items 갱신으로 재트리거 방지) */
+  /** 결과 탭: 보고서 JSON 변경 시 자동 저장 (handleSave는 ref로 호출해 저장 후 items 갱신으로 재트리거 방지) */
   useEffect(() => {
-    if (!favoriteSchemaV2OrHigher || activeTab !== "result" || selectedFavoriteId == null) return;
-    if (v2AutosaveSkipNextRef.current) {
-      v2AutosaveSkipNextRef.current = false;
+    if (activeTab !== "result" || selectedFavoriteId == null) return;
+    if (reportAutosaveSkipNextRef.current) {
+      reportAutosaveSkipNextRef.current = false;
       return;
     }
+    const nextJson = computeReportFavoriteSaveSearchJson();
+    if (nextJson == null) return;
+    const item = items.find((i) => i.favoriteId === selectedFavoriteId);
+    if (item?.searchJson === nextJson) return;
     const t = window.setTimeout(() => {
-      void handleSaveRef.current();
+      void handleSaveRef.current({ refreshList: false });
     }, 150);
     return () => window.clearTimeout(t);
-  }, [
-    favoriteSchemaV2OrHigher,
-    activeTab,
-    selectedFavoriteId,
-    checkedCardPackByFloor,
-    starredCardPackIds,
-    plannedCardPackDifficultyByFloor,
-    v2PlannedFloorRowCount,
-    starredEgoGiftIds,
-    checkedEgoGiftIds,
-    observedEgoGiftIds,
-    resultCardPackDifficulty,
-    resultEgoGiftViewMode,
-  ]);
+  }, [activeTab, selectedFavoriteId, items, computeReportFavoriteSaveSearchJson]);
 
   const startEditTitle = (e: React.MouseEvent, item: { favoriteId: number; searchJson: string }) => {
     e.stopPropagation();
@@ -2031,7 +3492,7 @@ function FavoritesPageClient() {
   const saveEditTitle = async (item: { favoriteId: number; searchJson: string }) => {
     const uuid = getOrCreateUUID();
     if (!uuid) {
-      setError("UUID를 생성할 수 없습니다.");
+      setSaveFailureToastMessage("UUID를 생성할 수 없습니다.");
       return;
     }
     const trimmed = editingTitleInput.trim();
@@ -2039,7 +3500,7 @@ function FavoritesPageClient() {
     try {
       parsed = JSON.parse(item.searchJson) as { title?: string; [key: string]: unknown };
     } catch {
-      setError("저장 데이터를 읽을 수 없습니다.");
+      setSaveFailureToastMessage("저장 데이터를 읽을 수 없습니다.");
       return;
     }
     if (trimmed === (parsed.title ?? "")) {
@@ -2062,10 +3523,10 @@ function FavoritesPageClient() {
         if (selectedFavoriteId === item.favoriteId) setTitleInput(trimmed);
         cancelEditTitle();
       } else {
-        setError(data.message ?? "제목 수정에 실패했습니다.");
+        setSaveFailureToastMessage(data.message ?? "제목 수정에 실패했습니다.");
       }
     } catch {
-      setError("제목 수정에 실패했습니다.");
+      setSaveFailureToastMessage("제목 수정에 실패했습니다.");
     } finally {
       setEditingId(null);
     }
@@ -2231,6 +3692,10 @@ function FavoritesPageClient() {
 
   const submitShareBoardComment = async (content: string, parentCommentId?: number | null) => {
     if (!shareBoardSelectedPost) return;
+    if (!shareBoardAuthenticated) {
+      setError("로그인이 필요합니다.");
+      return;
+    }
     const trimmed = content.trim();
     if (!trimmed) return;
     setShareBoardCommentSubmitting(true);
@@ -2279,6 +3744,7 @@ function FavoritesPageClient() {
 
   const moveToShareBoardWithFavorite = (e: React.MouseEvent, favoriteId: number) => {
     e.stopPropagation();
+    if (!ensureShareBoardRegisterAccess()) return;
     const target = items.find((it) => it.favoriteId === favoriteId);
     let suggestedTitle = "";
     try {
@@ -2427,12 +3893,15 @@ function FavoritesPageClient() {
         plannedCardPackDifficultyByFloor?: Record<string, string>;
         plannedFloorRowCount?: number;
         checkedEgoGiftIds?: number[];
+        startEgoGiftIds?: number[];
         observedEgoGiftIds?: number[];
         resultEgoGiftViewByKeyword?: boolean;
         resultEgoGiftViewMode?: string;
+        reportPersonalitySlots?: unknown;
+        reportEgoSlots?: unknown;
       };
 
-      v2AutosaveSkipNextRef.current = true;
+      reportAutosaveSkipNextRef.current = true;
       setSelectedFavoriteId(savedFavoriteId);
       setActiveTab("result");
       const importedTitle = (parsed.title ?? "").trim();
@@ -2447,12 +3916,12 @@ function FavoritesPageClient() {
       setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
       setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
       setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
-      setObservedEgoGiftIds(
-        Array.isArray(parsed.observedEgoGiftIds)
-          ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
-          : [],
-      );
+      setStartEgoGiftIds(parsePinnedEgoGiftIds(parsed.startEgoGiftIds, 3));
+      setObservedEgoGiftIds(parsePinnedEgoGiftIds(parsed.observedEgoGiftIds, 3));
+      setReportPersonalitySlots(parseReportPersonalitySlots(parsed.reportPersonalitySlots));
+      setReportEgoSlots(parseReportEgoSlots(parsed.reportEgoSlots));
       setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
+      applyResultTabUiPrefsFromRecord(parsed);
       setShareToastMessage("게시글을 보고서로 복사했습니다.");
     } catch {
       setError("게시글 보고서 복사에 실패했습니다.");
@@ -2568,6 +4037,13 @@ function FavoritesPageClient() {
   }, [activeTab, shareBoardMode, shareBoardFavoriteIdParam]);
 
   useEffect(() => {
+    if (activeTab !== "share-board" || shareBoardMode !== "new") return;
+    if (!shareBoardAuthChecked || shareBoardAuthenticated) return;
+    setError("로그인이 필요합니다.");
+    pushFavoritesRoute({ tab: "share-board", shareBoardMode: "list", postId: null, favoriteId: null });
+  }, [activeTab, shareBoardMode, shareBoardAuthChecked, shareBoardAuthenticated, pushFavoritesRoute]);
+
+  useEffect(() => {
     if (activeTab !== "share-board") return;
     if (shareBoardMode !== "detail") return;
     if (!Number.isFinite(shareBoardPostIdParam) || shareBoardPostIdParam <= 0) return;
@@ -2583,7 +4059,12 @@ function FavoritesPageClient() {
       setShareBoardPreviewSynthesisRecipes([]);
       setShareBoardPreviewCheckedCardPackByFloor({});
       setShareBoardPreviewPlannedCardPackDifficultyByFloor({});
+      setShareBoardPreviewStartEgoGiftIds([]);
       setShareBoardPreviewObservedEgoGiftIds([]);
+      setShareBoardPreviewReportPersonalitySlots(emptyReportPersonalitySlots());
+      setShareBoardPreviewReportEgoSlots(emptyReportEgoSlots());
+      setShareBoardPreviewFlippedSlots({});
+      setShareBoardPreviewIdentityTab("personality");
       setShareBoardPreviewSchemaVersion(1);
       setShareBoardPreviewEgoGiftViewMode("keyword");
       setShareBoardPreviewLoading(false);
@@ -2597,17 +4078,21 @@ function FavoritesPageClient() {
         egogiftIds?: number[];
         cardPackCheckedByFloor?: Record<string, number>;
         plannedCardPackDifficultyByFloor?: Record<string, string>;
+        startEgoGiftIds?: number[];
         observedEgoGiftIds?: number[];
         resultEgoGiftViewMode?: ResultEgoGiftViewMode;
         resultEgoGiftViewByKeyword?: boolean;
+        reportPersonalitySlots?: unknown;
+        reportEgoSlots?: unknown;
       };
       setShareBoardPreviewSchemaVersion(Number(shareBoardSelectedPost.schemaVersion ?? 1));
       const cardPackIds = Array.isArray(parsed.cardPackIds) ? parsed.cardPackIds.map(Number).filter((n) => Number.isFinite(n) && n > 0) : [];
       const egogiftIds = Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds.map(Number).filter((n) => Number.isFinite(n) && n > 0) : [];
+      const startIds = parsePinnedEgoGiftIds(parsed.startEgoGiftIds, 3);
       const observedIds = Array.isArray(parsed.observedEgoGiftIds)
         ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
         : [];
-      const allEgoGiftIds = [...new Set([...egogiftIds, ...observedIds])];
+      const allEgoGiftIds = [...new Set([...egogiftIds, ...startIds, ...observedIds])];
       const byFloor = parsed.cardPackCheckedByFloor && typeof parsed.cardPackCheckedByFloor === "object"
         ? Object.fromEntries(
             Object.entries(parsed.cardPackCheckedByFloor)
@@ -2619,9 +4104,14 @@ function FavoritesPageClient() {
       setShareBoardPreviewPlannedCardPackDifficultyByFloor(
         parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor)
       );
+      setShareBoardPreviewStartEgoGiftIds(startIds);
       setShareBoardPreviewObservedEgoGiftIds(
         observedIds
       );
+      setShareBoardPreviewReportPersonalitySlots(parseReportPersonalitySlots(parsed.reportPersonalitySlots));
+      setShareBoardPreviewReportEgoSlots(parseReportEgoSlots(parsed.reportEgoSlots));
+      setShareBoardPreviewFlippedSlots({});
+      setShareBoardPreviewIdentityTab("personality");
       setShareBoardPreviewEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
 
       const cardPackTask = (async () => {
@@ -2711,6 +4201,10 @@ function FavoritesPageClient() {
       setShareBoardPreviewCardPacks([]);
       setShareBoardPreviewEgoGifts([]);
       setShareBoardPreviewSynthesisRecipes([]);
+      setShareBoardPreviewReportPersonalitySlots(emptyReportPersonalitySlots());
+      setShareBoardPreviewReportEgoSlots(emptyReportEgoSlots());
+      setShareBoardPreviewFlippedSlots({});
+      setShareBoardPreviewIdentityTab("personality");
       setShareBoardPreviewLoading(false);
     }
     return () => {
@@ -2801,11 +4295,14 @@ function FavoritesPageClient() {
           plannedCardPackDifficultyByFloor?: Record<string, string>;
           plannedFloorRowCount?: number;
           checkedEgoGiftIds?: number[];
+        startEgoGiftIds?: number[];
           observedEgoGiftIds?: number[];
           resultEgoGiftViewByKeyword?: boolean;
           resultEgoGiftViewMode?: string;
+          reportPersonalitySlots?: unknown;
+          reportEgoSlots?: unknown;
         };
-        v2AutosaveSkipNextRef.current = true;
+        reportAutosaveSkipNextRef.current = true;
         setSelectedFavoriteId(data.data.favoriteId);
         const importedTitle = (parsed.title ?? "").trim();
         setTitleInput(importedTitle ? getUniqueReportTitle(importedTitle, updatedItems) : "");
@@ -2819,19 +4316,17 @@ function FavoritesPageClient() {
         setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
         setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
         setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
-        setObservedEgoGiftIds(
-          Array.isArray(parsed.observedEgoGiftIds)
-            ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
-            : [],
-        );
+        setStartEgoGiftIds(parsePinnedEgoGiftIds(parsed.startEgoGiftIds, 3));
+        setObservedEgoGiftIds(parsePinnedEgoGiftIds(parsed.observedEgoGiftIds, 3));
+        setReportPersonalitySlots(parseReportPersonalitySlots(parsed.reportPersonalitySlots));
+        setReportEgoSlots(parseReportEgoSlots(parsed.reportEgoSlots));
         setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
-        setSaveToastState("visible");
-        setToastSlideDown(true);
+        applyResultTabUiPrefsFromRecord(parsed);
       } else {
-        setError(data.message ?? "불러오기에 실패했습니다.");
+        setSaveFailureToastMessage(data.message ?? "불러오기에 실패했습니다.");
       }
     } catch {
-      setError("불러오기에 실패했습니다.");
+      setSaveFailureToastMessage("불러오기에 실패했습니다.");
     } finally {
       setImporting(false);
     }
@@ -2864,7 +4359,11 @@ function FavoritesPageClient() {
           setV2PlannedFloorRowCount(1);
           setCheckedEgoGiftIds([]);
           setResultEgoGiftViewMode("keyword");
+          setStartEgoGiftIds([]);
           setObservedEgoGiftIds([]);
+          setReportPersonalitySlots(emptyReportPersonalitySlots());
+          setReportEgoSlots(emptyReportEgoSlots());
+          resetResultTabUiPrefsToDefaults();
         }
         await fetchFavorites();
       } else {
@@ -2919,7 +4418,9 @@ function FavoritesPageClient() {
         <div className={favoritesPanelOpen ? "mb-4" : "mt-3"}>
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => {
+              void handleSave();
+            }}
             disabled={registering}
             className="w-full px-4 py-2 rounded bg-green-600 hover:bg-green-500 text-white font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
@@ -2970,6 +4471,13 @@ function FavoritesPageClient() {
           ) : items.length === 0 ? (
             <p className="text-gray-400 text-sm">등록된 즐겨찾기가 없습니다.</p>
           ) : (
+            <div
+              className={
+                items.length >= 5
+                  ? "max-h-[15.75rem] overflow-y-auto overflow-x-hidden pr-0.5 rounded-md [scrollbar-width:thin] [scrollbar-color:#b8860b_#1a1a1a] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded [&::-webkit-scrollbar-track]:bg-[#1a1a1a] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#b8860b]/55 [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-[#131316]/80 [&::-webkit-scrollbar-thumb:hover]:bg-[#d4af37]/70"
+                  : undefined
+              }
+            >
             <ul className="space-y-2">
               {items.map((item) => {
                 let title = "";
@@ -2986,7 +4494,7 @@ function FavoritesPageClient() {
                     tabIndex={0}
                     onClick={() => {
                       if (deletingId === item.favoriteId || editingFavoriteId === item.favoriteId) return;
-                      v2AutosaveSkipNextRef.current = true;
+                      reportAutosaveSkipNextRef.current = true;
                       setSelectedFavoriteId(item.favoriteId);
                       try {
                         const parsed = JSON.parse(item.searchJson) as {
@@ -2998,9 +4506,12 @@ function FavoritesPageClient() {
                           plannedCardPackDifficultyByFloor?: Record<string, string>;
                           plannedFloorRowCount?: number;
                           checkedEgoGiftIds?: number[];
+                          startEgoGiftIds?: number[];
                           observedEgoGiftIds?: number[];
                           resultEgoGiftViewByKeyword?: boolean;
                           resultEgoGiftViewMode?: string;
+                          reportPersonalitySlots?: unknown;
+                          reportEgoSlots?: unknown;
                         };
                         setTitleInput("");
                         setStarredEgoGiftIds(Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds : []);
@@ -3013,12 +4524,12 @@ function FavoritesPageClient() {
                         setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
                         setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
                         setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
-                        setObservedEgoGiftIds(
-                          Array.isArray(parsed.observedEgoGiftIds)
-                            ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
-                            : [],
-                        );
+                        setStartEgoGiftIds(parsePinnedEgoGiftIds(parsed.startEgoGiftIds, 3));
+                        setObservedEgoGiftIds(parsePinnedEgoGiftIds(parsed.observedEgoGiftIds, 3));
+                        setReportPersonalitySlots(parseReportPersonalitySlots(parsed.reportPersonalitySlots));
+                        setReportEgoSlots(parseReportEgoSlots(parsed.reportEgoSlots));
                         setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
+                        applyResultTabUiPrefsFromRecord(parsed);
                       } catch {
                         setTitleInput("");
                         setStarredEgoGiftIds([]);
@@ -3028,15 +4539,19 @@ function FavoritesPageClient() {
                         setPlannedCardPackDifficultyByFloor({});
                         setV2PlannedFloorRowCount(1);
                         setCheckedEgoGiftIds([]);
+                        setStartEgoGiftIds([]);
                         setObservedEgoGiftIds([]);
+                        setReportPersonalitySlots(emptyReportPersonalitySlots());
+                        setReportEgoSlots(emptyReportEgoSlots());
                         setResultEgoGiftViewMode("keyword");
+                        resetResultTabUiPrefsToDefaults();
                       }
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         if (deletingId === item.favoriteId || editingFavoriteId === item.favoriteId) return;
-                        v2AutosaveSkipNextRef.current = true;
+                        reportAutosaveSkipNextRef.current = true;
                         setSelectedFavoriteId(item.favoriteId);
                         try {
                           const parsed = JSON.parse(item.searchJson) as {
@@ -3048,9 +4563,12 @@ function FavoritesPageClient() {
                             plannedCardPackDifficultyByFloor?: Record<string, string>;
                             plannedFloorRowCount?: number;
                             checkedEgoGiftIds?: number[];
+                            startEgoGiftIds?: number[];
                             observedEgoGiftIds?: number[];
                             resultEgoGiftViewByKeyword?: boolean;
                             resultEgoGiftViewMode?: string;
+                            reportPersonalitySlots?: unknown;
+                            reportEgoSlots?: unknown;
                           };
                           setTitleInput("");
                           setStarredEgoGiftIds(Array.isArray(parsed.egogiftIds) ? parsed.egogiftIds : []);
@@ -3063,12 +4581,12 @@ function FavoritesPageClient() {
                           setPlannedCardPackDifficultyByFloor(parsePlannedCardPackDifficultyByFloor(parsed.plannedCardPackDifficultyByFloor));
                           setV2PlannedFloorRowCount(parseV2PlannedRowCount(parsed.plannedFloorRowCount, byFloor as Record<number, number>));
                           setCheckedEgoGiftIds(Array.isArray(parsed.checkedEgoGiftIds) ? parsed.checkedEgoGiftIds : []);
-                          setObservedEgoGiftIds(
-                            Array.isArray(parsed.observedEgoGiftIds)
-                              ? parsed.observedEgoGiftIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0).slice(0, 3)
-                              : [],
-                          );
+                          setStartEgoGiftIds(parsePinnedEgoGiftIds(parsed.startEgoGiftIds, 3));
+                          setObservedEgoGiftIds(parsePinnedEgoGiftIds(parsed.observedEgoGiftIds, 3));
+                          setReportPersonalitySlots(parseReportPersonalitySlots(parsed.reportPersonalitySlots));
+                          setReportEgoSlots(parseReportEgoSlots(parsed.reportEgoSlots));
                           setResultEgoGiftViewMode(parseResultEgoGiftViewMode(parsed));
+                          applyResultTabUiPrefsFromRecord(parsed);
                         } catch {
                           setTitleInput("");
                           setStarredEgoGiftIds([]);
@@ -3078,8 +4596,12 @@ function FavoritesPageClient() {
                           setPlannedCardPackDifficultyByFloor({});
                           setV2PlannedFloorRowCount(1);
                           setCheckedEgoGiftIds([]);
+                          setStartEgoGiftIds([]);
                           setObservedEgoGiftIds([]);
+                          setReportPersonalitySlots(emptyReportPersonalitySlots());
+                          setReportEgoSlots(emptyReportEgoSlots());
                           setResultEgoGiftViewMode("keyword");
+                          resetResultTabUiPrefsToDefaults();
                         }
                       }
                     }}
@@ -3163,6 +4685,7 @@ function FavoritesPageClient() {
                 );
               })}
             </ul>
+            </div>
           )}
         </div>
       </div>
@@ -3184,21 +4707,11 @@ function FavoritesPageClient() {
     >
       {/* 캡처 시 버튼 영역 숨김 (이미지에 포함되지 않도록) */}
       <style dangerouslySetInnerHTML={{ __html: ".keyword-capture-hex .exclude-from-capture { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; width: 0 !important; min-width: 0 !important; max-width: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; border: none !important; opacity: 0 !important; pointer-events: none !important; position: absolute !important; left: -9999px !important; } .keyword-capture-hex [data-cardpack-title] { min-height: 3.5rem !important; padding-bottom: 0.375rem !important; } .keyword-capture-hex [data-cardpack-title] p:first-of-type { line-height: 1.5 !important; min-height: 3em !important; overflow: visible !important; } .keyword-capture-hex [data-floor-empty-notice] { overflow: visible !important; white-space: normal !important; text-overflow: clip !important; line-height: 1.625 !important; padding-bottom: 0.25rem !important; min-height: 2.75rem !important; }" }} />
-      {/* 저장 완료 토스트: 최상단에서 내려왔다가 올라가는 안내 */}
-      {saveToastState !== "hidden" && (
-        <div
-          className="fixed left-0 right-0 top-0 z-[9999] flex justify-center pt-4 transition-transform duration-300 ease-out"
-          style={{
-            transform:
-              saveToastState === "exiting"
-                ? "translateY(-100%)"
-                : toastSlideDown
-                  ? "translateY(0)"
-                  : "translateY(-100%)",
-          }}
-        >
-          <div className="rounded-lg bg-green-600/95 px-6 py-3 text-white font-medium shadow-lg backdrop-blur-sm border border-green-400/50">
-            저장되었습니다.
+      {/* 저장 실패 토스트 */}
+      {saveFailureToastMessage && (
+        <div className="fixed left-0 right-0 top-0 z-[9999] flex justify-center pt-4 px-4 pointer-events-none">
+          <div className="rounded-lg bg-red-900/95 px-6 py-3 text-white font-medium shadow-lg backdrop-blur-sm border border-red-400/50 max-w-[min(36rem,calc(100vw-2rem))] text-center">
+            {saveFailureToastMessage}
           </div>
         </div>
       )}
@@ -3246,17 +4759,19 @@ function FavoritesPageClient() {
           >
             공유
           </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              moveToShareBoardWithFavorite(e, favoriteActionsTarget.favoriteId);
-              setFavoriteActionsMenuId(null);
-              setFavoriteActionsMenuPosition(null);
-            }}
-            className="whitespace-nowrap text-left px-3 py-1.5 text-sm text-cyan-200 hover:bg-cyan-400/15"
-          >
-            공유게시판 등록
-          </button>
+          {shareBoardAuthenticated ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                moveToShareBoardWithFavorite(e, favoriteActionsTarget.favoriteId);
+                setFavoriteActionsMenuId(null);
+                setFavoriteActionsMenuPosition(null);
+              }}
+              className="whitespace-nowrap text-left px-3 py-1.5 text-sm text-cyan-200 hover:bg-cyan-400/15"
+            >
+              공유게시판 등록
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={(e) => {
@@ -3402,7 +4917,7 @@ function FavoritesPageClient() {
 
       <div className="absolute inset-0 bg-black/60 z-0" />
       <div className="relative z-10">
-        <div className="container mx-auto px-4 py-8">
+        <div ref={mainContentContainerRef} className="container mx-auto px-4 py-8">
           {/* 상단 탭 (스크롤 시 상단 고정) */}
           <div className="sticky top-16 z-[110] flex items-center gap-2 mb-6 flex-wrap py-2 -mx-4 px-4 bg-[#0d0d0f]/95 backdrop-blur-sm border-b border-[#b8860b]/20">
             <div className="flex gap-2">
@@ -3430,34 +4945,18 @@ function FavoritesPageClient() {
             </div>
           </div>
 
-          {activeTab === "egogift" ? (
-            selectedFavoriteId !== null ? (
-              <EgoGiftPageContent
-                slotAboveSearch={favoritesPanel}
-                embedded
-                starredEgoGiftIds={starredEgoGiftIds}
-                onStarClick={handleStarToggle}
-                openEgoGiftPreviewRef={egoGiftPreviewOpenRef}
-                enableSynthesisMaterialsPrefetch
-              />
-            ) : (
-              <div className="flex flex-col lg:flex-row gap-6">
-                <div className="w-full lg:w-1/5 flex-shrink-0 order-1 lg:order-1 min-w-[240px]">
-                  {favoritesPanel}
-                </div>
-                <div className="flex-1 order-2 lg:order-2">
-                  <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
-                    <p className="text-gray-400">보고서를 생성/선택해주세요.</p>
-                  </div>
-                </div>
-              </div>
-            )
-          ) : activeTab === "share-board" ? (
+          {activeTab === "share-board" ? (
             <div className="w-full">
               <div className="w-full">
                 {activeTab === "share-board" && (
                   <div className="space-y-4">
-                    <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
+                    <div
+                      ref={(el) => {
+                        if (shareBoardMode === "list") shareBoardListSectionRef.current = el;
+                        if (shareBoardMode === "new") shareBoardNewSectionRef.current = el;
+                      }}
+                      className={shareBoardMode === "detail" ? "space-y-4" : "bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6"}
+                    >
                       <div className="flex items-center justify-between gap-2 mb-3">
                         <h3 className="text-lg font-semibold text-yellow-300">
                           {shareBoardMode === "new" ? "공유게시판 등록" : shareBoardMode === "detail" ? "게시글 상세" : "공유게시판 목록"}
@@ -3472,7 +4971,15 @@ function FavoritesPageClient() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => pushFavoritesRoute({ tab: "share-board", shareBoardMode: "new", postId: null, favoriteId: shareBoardFavoriteId ? String(shareBoardFavoriteId) : null })}
+                            onClick={() => {
+                              if (!ensureShareBoardRegisterAccess()) return;
+                              pushFavoritesRoute({
+                                tab: "share-board",
+                                shareBoardMode: "new",
+                                postId: null,
+                                favoriteId: shareBoardFavoriteId ? String(shareBoardFavoriteId) : null,
+                              });
+                            }}
                             className="px-3 py-1.5 text-sm rounded border border-cyan-500/40 text-cyan-200 hover:bg-cyan-500/10"
                           >
                             등록
@@ -3558,46 +5065,319 @@ function FavoritesPageClient() {
                                 </>
                               ) : (
                                 <>
-                                  <div className="text-xl font-semibold text-yellow-200">{shareBoardSelectedPost.title}</div>
-                                  <div className="text-sm text-gray-400">
-                                    작성자: {shareBoardSelectedPost.authorNickname || "사용자"} · 추천 {shareBoardSelectedPost.recommendCount ?? 0} · 댓글 {shareBoardSelectedPost.commentCount ?? 0} · 조회 {shareBoardSelectedPost.viewCount} · {shareBoardSelectedPost.createdAt ? new Date(shareBoardSelectedPost.createdAt).toLocaleString() : "-"}
-                                  </div>
-                                  <div className="text-sm text-gray-200 whitespace-pre-wrap min-h-[60px] bg-[#1a1a1d] border border-[#b8860b]/20 rounded p-3">
-                                    {shareBoardSelectedPost.description || "설명 없음"}
-                                  </div>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <button type="button" onClick={handleShareBoardCopyToReport} disabled={importing} className="px-3 py-2 rounded bg-cyan-400 text-black font-semibold hover:bg-cyan-300 disabled:opacity-50">
-                                      {importing ? "복사 중..." : "보고서로 복사"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={handleShareBoardToggleRecommend}
-                                      className={`px-3 py-2 rounded border font-semibold transition-colors ${shareBoardSelectedPost.recommendedByMe ? "border-emerald-400/60 text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20" : "border-[#b8860b]/40 text-yellow-300 hover:bg-yellow-500/10"}`}
-                                    >
-                                      {shareBoardSelectedPost.recommendedByMe ? "추천 취소" : "추천"} ({shareBoardSelectedPost.recommendCount ?? 0})
-                                    </button>
-                                    {shareBoardSelectedPost.isMine && (
-                                      <div className="ml-auto flex items-center gap-2">
-                                        <button type="button" onClick={startShareBoardEdit} className="px-3 py-2 rounded border border-[#b8860b]/40 text-yellow-300 hover:bg-yellow-500/10">수정</button>
-                                        <button type="button" onClick={handleShareBoardDelete} disabled={shareBoardDeleting} className="px-3 py-2 rounded border border-red-500/50 text-red-300 hover:bg-red-500/10 disabled:opacity-50">
-                                          {shareBoardDeleting ? "삭제 중..." : "삭제"}
-                                        </button>
-                                      </div>
-                                    )}
+                                  <div ref={shareBoardDetailPostInfoSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-5 space-y-3">
+                                    <div className="text-xl font-semibold text-yellow-200">{shareBoardSelectedPost.title}</div>
+                                    <div className="text-sm text-gray-400">
+                                      작성자: {shareBoardSelectedPost.authorNickname || "사용자"} · 추천 {shareBoardSelectedPost.recommendCount ?? 0} · 댓글 {shareBoardSelectedPost.commentCount ?? 0} · 조회 {shareBoardSelectedPost.viewCount} · {shareBoardSelectedPost.createdAt ? new Date(shareBoardSelectedPost.createdAt).toLocaleString() : "-"}
+                                    </div>
+                                    <div className="text-sm text-gray-200 whitespace-pre-wrap min-h-[60px] bg-[#1a1a1d] border border-[#b8860b]/20 rounded p-3">
+                                      {shareBoardSelectedPost.description || "설명 없음"}
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <button type="button" onClick={handleShareBoardCopyToReport} disabled={importing} className="px-3 py-2 rounded bg-cyan-400 text-black font-semibold hover:bg-cyan-300 disabled:opacity-50">
+                                        {importing ? "복사 중..." : "보고서로 복사"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={handleShareBoardToggleRecommend}
+                                        className={`px-3 py-2 rounded border font-semibold transition-colors ${shareBoardSelectedPost.recommendedByMe ? "border-emerald-400/60 text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20" : "border-[#b8860b]/40 text-yellow-300 hover:bg-yellow-500/10"}`}
+                                      >
+                                        {shareBoardSelectedPost.recommendedByMe ? "추천 취소" : "추천"} ({shareBoardSelectedPost.recommendCount ?? 0})
+                                      </button>
+                                      {shareBoardSelectedPost.isMine && (
+                                        <div className="ml-auto flex items-center gap-2">
+                                          <button type="button" onClick={startShareBoardEdit} className="px-3 py-2 rounded border border-[#b8860b]/40 text-yellow-300 hover:bg-yellow-500/10">수정</button>
+                                          <button type="button" onClick={handleShareBoardDelete} disabled={shareBoardDeleting} className="px-3 py-2 rounded border border-red-500/50 text-red-300 hover:bg-red-500/10 disabled:opacity-50">
+                                            {shareBoardDeleting ? "삭제 중..." : "삭제"}
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
 
-                                  <div className="border-t border-[#b8860b]/30 pt-4 mt-2">
-                                    <div className="text-sm font-semibold text-yellow-300 mb-2">
-                                      공유 보고서 미리보기
-                                    </div>
+                                  <div>
                                     {shareBoardPreviewLoading ? (
                                       <p className="text-sm text-gray-400">보고서 내용을 불러오는 중...</p>
                                     ) : (
                                       <div className="space-y-4">
+                                        <div ref={shareBoardDetailPreviewSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-5">
+                                          <div className="border-b border-[#b8860b]/30 pb-2 mb-3 flex items-center justify-between gap-2">
+                                            <h4 className="text-lg font-semibold text-yellow-300">인격/에고 편성 현황</h4>
+                                            <div className="inline-flex rounded-md border border-[#b8860b]/35 bg-[#1a1a1d] p-0.5">
+                                              <button
+                                                type="button"
+                                                onClick={() => setShareBoardPreviewIdentityTab("personality")}
+                                                className={`px-2.5 py-1 text-xs rounded ${
+                                                  shareBoardPreviewIdentityTab === "personality"
+                                                    ? "bg-amber-500/25 text-amber-100"
+                                                    : "text-gray-400 hover:bg-white/5"
+                                                }`}
+                                              >
+                                                인격
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setShareBoardPreviewIdentityTab("ego")}
+                                                className={`px-2.5 py-1 text-xs rounded ${
+                                                  shareBoardPreviewIdentityTab === "ego"
+                                                    ? "bg-amber-500/25 text-amber-100"
+                                                    : "text-gray-400 hover:bg-white/5"
+                                                }`}
+                                              >
+                                                E.G.O
+                                              </button>
+                                            </div>
+                                          </div>
+                                          <div className="space-y-3">
+                                            {shareBoardPreviewIdentityTab === "personality" ? (
+                                            <>
+                                            <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                                              <div className="rounded border border-emerald-500/30 bg-emerald-900/10 px-2 py-2">
+                                                <div className="mb-1 text-[11px] text-emerald-200/90">편성 인격 키워드</div>
+                                                {shareBoardPreviewFormationKeywordCounts.length === 0 ? (
+                                                  <p className="text-[11px] text-gray-500">아직 편성된 인격이 없습니다.</p>
+                                                ) : (
+                                                  <div className="flex flex-wrap items-center gap-1.5">
+                                                    {shareBoardPreviewFormationKeywordCounts.map((row) => (
+                                                      <div
+                                                        key={`share-preview-formation-kw-${row.keyword}`}
+                                                        className="inline-flex items-center gap-1 rounded border border-emerald-400/25 bg-[#151b18] px-1.5 py-1"
+                                                      >
+                                                        <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                                        <span className="text-[11px] text-emerald-100">{row.count}</span>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                                <div className="mt-2 border-t border-emerald-500/25 pt-2">
+                                                  <div className="mb-1 text-[11px] text-emerald-200/90">속성별 최대 획득 가능 자원 ( 1 라운드 기준 / 집중 전투 )</div>
+                                                  {shareBoardPreviewFormationRound1AcquirableResources.length === 0 ? (
+                                                    <p className="text-[11px] text-gray-500">편성 인격이 없거나 조건에 맞는 스킬이 없습니다.</p>
+                                                  ) : (
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                      {shareBoardPreviewFormationRound1AcquirableResources.map((row) => (
+                                                        <div
+                                                          key={`share-preview-round1-res-${row.name}`}
+                                                          className="inline-flex items-center gap-1 rounded border border-emerald-400/30 bg-[#151b18] px-1.5 py-1"
+                                                        >
+                                                          <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                                          <span className="text-[11px] text-emerald-100 tabular-nums">{row.count}</span>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                              <div className="rounded border border-[#b8860b]/25 bg-[#0f0f12] px-2 py-2">
+                                                <div className="mb-1 text-[11px] text-gray-400">전체 인격 키워드</div>
+                                                {shareBoardPreviewPersonalityKeywordCounts.length === 0 ? (
+                                                  <p className="text-[11px] text-gray-500">아직 집계할 키워드가 없습니다.</p>
+                                                ) : (
+                                                  <div className="flex flex-wrap items-center gap-1.5">
+                                                    {shareBoardPreviewPersonalityKeywordCounts.map((row) => (
+                                                      <div
+                                                        key={`share-preview-kw-${row.keyword}`}
+                                                        className="inline-flex items-center gap-1 rounded border border-[#b8860b]/20 bg-[#151518] px-1.5 py-1"
+                                                      >
+                                                        <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                                        <span className="text-[11px] text-gray-200">{row.count}</span>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                            <div>
+                                              <div className="text-xs font-semibold text-emerald-200/90 mb-2">인격 선택</div>
+                                              <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-6">
+                                                {REPORT_PERSONALITY_OPTIONS.map((p, slotIndex) => {
+                                                  const slot = shareBoardPreviewReportPersonalitySlots[slotIndex] ?? null;
+                                                  const egoPicked = shareBoardPreviewReportEgoSlots[slotIndex]?.selectedByGrade ?? {};
+                                                  const flipped = Boolean(shareBoardPreviewFlippedSlots[slotIndex]);
+                                                  const filled = slot != null && slot.imagePath;
+                                                  return (
+                                                    <button
+                                                      key={`share-preview-personality-${p.order}`}
+                                                      type="button"
+                                                      onClick={() =>
+                                                        setShareBoardPreviewFlippedSlots((prev) => ({
+                                                          ...prev,
+                                                          [slotIndex]: !prev[slotIndex],
+                                                        }))
+                                                      }
+                                                      className={`flex min-w-0 w-full flex-col overflow-hidden rounded-lg border ${
+                                                        filled
+                                                          ? personalityGradeCardToneClass(slot?.grade)
+                                                          : "border-[#b8860b]/40 bg-[#1a1a1d]"
+                                                      }`}
+                                                      style={{ perspective: "900px" }}
+                                                    >
+                                                      <div
+                                                        className="relative w-full transition-transform duration-300"
+                                                        style={{ transformStyle: "preserve-3d", transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)" }}
+                                                      >
+                                                        <div style={{ backfaceVisibility: "hidden" }}>
+                                                          <div className="relative w-full aspect-[2/3] bg-[#111] shrink-0 overflow-hidden">
+                                                            {filled ? (
+                                                              <img
+                                                                src={`${RESULT_EGOGIFT_BASE_URL}${slot!.imagePath}`}
+                                                                alt=""
+                                                                className="absolute inset-0 h-full w-full object-cover"
+                                                              />
+                                                            ) : (
+                                                              <div
+                                                                className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-45"
+                                                                style={{ backgroundImage: `url(${p.image})`, backgroundPosition: "center 18%" }}
+                                                                aria-hidden
+                                                              />
+                                                            )}
+                                                            {filled && slot?.formationOrder ? (
+                                                              <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-black/15">
+                                                                <span className={`text-2xl sm:text-3xl md:text-4xl xl:text-5xl font-extrabold drop-shadow-[0_2px_6px_rgba(0,0,0,0.8)] ${
+                                                                  slot.formationOrder <= 7 ? "text-yellow-300" : "text-cyan-300"
+                                                                }`}>
+                                                                  {slot.formationOrder}
+                                                                </span>
+                                                              </div>
+                                                            ) : null}
+                                                            {filled ? (
+                                                              <div className="pointer-events-none absolute bottom-0.5 right-0.5 z-[6] flex flex-wrap items-end justify-end gap-px rounded bg-black/35 p-px sm:bottom-1 sm:right-1 sm:gap-0.5 sm:p-0.5">
+                                                                {getPersonalityKeywordIconPaths(slot?.keywords).map((src, ki) => (
+                                                                  <img
+                                                                    key={`share-preview-slot-kw-overlay-${p.order}-${ki}`}
+                                                                    src={src}
+                                                                    alt=""
+                                                                    width={32}
+                                                                    height={32}
+                                                                    className="h-5 w-5 shrink-0 object-contain sm:h-6 sm:w-6 lg:h-7 lg:w-7 xl:h-8 xl:w-8"
+                                                                  />
+                                                                ))}
+                                                              </div>
+                                                            ) : null}
+                                                          </div>
+                                                          <div className="flex flex-col items-center justify-center gap-0.5 border-t border-[#b8860b]/25 px-0.5 py-1.5 text-center leading-snug">
+                                                            <span className="flex min-h-[2.5rem] sm:min-h-[2.75rem] w-full items-center justify-center">
+                                                              <span className="line-clamp-2 w-full text-center text-[12px] sm:text-[14px] text-gray-200">
+                                                                {filled ? slot!.name : p.name}
+                                                              </span>
+                                                            </span>
+                                                            {filled ? (
+                                                              <div className="mt-1 w-full border-t border-[#b8860b]/20 px-1 pt-1">
+                                                                <div className="flex items-stretch gap-1">
+                                                                  {([0, 1, 2] as const).map((idx) => {
+                                                                    const rawValue = String(slot?.skillInputValues?.[idx] ?? "").trim();
+                                                                    const fallback = idx === 0 ? "3" : idx === 1 ? "2" : "1";
+                                                                    const value = rawValue || fallback;
+                                                                    const attrColor = getSkillAttributeBorderColor(slot?.skillAttributes, idx);
+                                                                    const iconPath = getSkillAttackTypeIconPath(slot?.skillAttackTypes, idx);
+                                                                    return (
+                                                                      <div
+                                                                        key={`share-preview-skill-line-${p.order}-${idx}`}
+                                                                        className="min-w-0 flex-1 rounded border px-1 py-0.5"
+                                                                        style={{
+                                                                          borderColor: attrColor,
+                                                                          backgroundColor: colorWithAlpha(attrColor, 0.1),
+                                                                        }}
+                                                                      >
+                                                                        <div className="flex flex-col items-center justify-center gap-0.5">
+                                                                          {iconPath ? (
+                                                                            <img src={iconPath} alt="" width={28} height={28} className="h-7 w-7 object-contain" />
+                                                                          ) : (
+                                                                            <span className="h-7 w-7" aria-hidden />
+                                                                          )}
+                                                                          <span className="text-[18px] font-semibold leading-tight text-gray-200">
+                                                                            {value}
+                                                                          </span>
+                                                                        </div>
+                                                                      </div>
+                                                                    );
+                                                                  })}
+                                                                </div>
+                                                              </div>
+                                                            ) : null}
+                                                          </div>
+                                                        </div>
+                                                        <div
+                                                          className="absolute inset-0 flex flex-col bg-[#151922]"
+                                                          style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
+                                                        >
+                                                          <div className="flex min-h-[2rem] items-center justify-center border-b border-[#b8860b]/30 px-2 py-1 text-[10px] font-semibold text-sky-200">
+                                                            {p.name} 선택 E.G.O
+                                                          </div>
+                                                          <div className="flex-1 p-2">
+                                                            <div className="space-y-1">
+                                                              {REPORT_EGO_GRADE_ORDER.map((grade) => (
+                                                                <div key={`share-preview-flip-${p.order}-${grade}`} className="flex items-center gap-1 text-[9px] sm:text-[10px]">
+                                                                  <span className="w-9 shrink-0 text-amber-300/90 font-semibold">{grade}</span>
+                                                                  <span className="min-w-0 truncate text-gray-200">{egoPicked[grade]?.title ?? "-"}</span>
+                                                                </div>
+                                                              ))}
+                                                            </div>
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                    </button>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                            </>
+                                            ) : (
+                                            <>
+                                            <div>
+                                              <div className="mb-2 rounded border border-sky-500/30 bg-sky-900/10 px-2 py-2">
+                                                <div className="mb-1 text-[11px] text-sky-200/90">필요 자원</div>
+                                                <div className="flex flex-wrap items-center gap-1.5">
+                                                  {shareBoardPreviewEgoResourceCounts.map((row) => (
+                                                    <div
+                                                      key={`share-preview-ego-resource-${row.name}`}
+                                                      className="inline-flex items-center gap-1 rounded border border-sky-400/25 bg-[#151922] px-1.5 py-1"
+                                                    >
+                                                      <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                                      <span className="text-[11px] text-sky-100">{row.value}</span>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                              <div className="text-xs font-semibold text-sky-200/90 mb-2">E.G.O 선택</div>
+                                              <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-6">
+                                                {REPORT_PERSONALITY_OPTIONS.map((p, slotIndex) => {
+                                                  const picked = shareBoardPreviewReportEgoSlots[slotIndex]?.selectedByGrade ?? {};
+                                                  const egoBackgroundImage = REPORT_PERSONALITY_ICON_BACKGROUND_BY_ORDER[p.order] ?? p.image;
+                                                  return (
+                                                    <div
+                                                      key={`share-preview-ego-${p.order}`}
+                                                      className="flex min-w-0 w-full flex-col overflow-hidden rounded-lg border border-[#b8860b]/40 bg-[#1a1a1d]"
+                                                    >
+                                                      <div className="relative flex h-[126px] sm:h-[158px] w-full items-center justify-center bg-[#111] shrink-0 overflow-hidden">
+                                                        <img src={egoBackgroundImage} alt="" className="block h-auto w-auto max-h-full max-w-full object-contain object-center opacity-55" />
+                                                      </div>
+                                                      <div className="min-h-[5rem] border-t border-[#b8860b]/25 px-1.5 py-2">
+                                                        <div className="text-[18px] sm:text-[20px] text-gray-100 font-semibold text-center line-clamp-1 mb-1.5">
+                                                          {p.name}
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                          {REPORT_EGO_GRADE_ORDER.map((grade) => (
+                                                            <div key={`share-preview-${p.order}-${grade}`} className="flex items-center gap-1.5 text-[16px] sm:text-[18px] leading-tight">
+                                                              <span className="w-16 shrink-0 text-amber-300/90 font-semibold">{grade}</span>
+                                                              <span className="min-w-0 truncate text-gray-200">{picked[grade]?.title ?? "-"}</span>
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                            </>
+                                            )}
+                                          </div>
+                                        </div>
                                         {shareBoardPreviewSchemaVersion === 2 && (
                                           <div className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 overflow-visible pb-6">
                                             <div className="border-b border-[#b8860b]/40 pb-3 mb-4">
-                                              <h4 className="text-base md:text-lg font-semibold text-yellow-200/90">진행(예정) 카드팩 목록</h4>
+                                              <h4 className="text-lg font-semibold text-yellow-300">진행(예정) 카드팩 목록</h4>
                                             </div>
                                             <div className="min-h-[120px] rounded-lg border border-[#b8860b]/30 bg-[#0d0d0f]/50 p-3 md:p-3 lg:p-4 overflow-visible">
                                               <div className="w-full space-y-3 sm:space-y-4">
@@ -3648,6 +5428,17 @@ function FavoritesPageClient() {
                                         <ObservedEgoGiftsSection
                                           catalog={shareBoardPreviewObservableCatalog}
                                           catalogLoading={false}
+                                          selectedIds={shareBoardPreviewStartEgoGiftIds}
+                                          onChange={() => {}}
+                                          imageBaseUrl={RESULT_EGOGIFT_BASE_URL}
+                                          onOpenEgoGiftByName={(name) => egoGiftPreviewOpenRef.current?.(name)}
+                                          sectionTitle="시작 에고기프트"
+                                          readOnly
+                                        />
+
+                                        <ObservedEgoGiftsSection
+                                          catalog={shareBoardPreviewObservableCatalog}
+                                          catalogLoading={false}
                                           selectedIds={shareBoardPreviewObservedEgoGiftIds}
                                           onChange={() => {}}
                                           imageBaseUrl={RESULT_EGOGIFT_BASE_URL}
@@ -3657,7 +5448,7 @@ function FavoritesPageClient() {
 
                                         <div className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 overflow-visible">
                                           <div className="flex items-center justify-between gap-2 mb-4 border-b border-[#b8860b]/30 pb-3">
-                                            <h4 className="text-base md:text-lg font-semibold text-yellow-200/90">선택한 에고기프트</h4>
+                                            <h4 className="text-lg font-semibold text-yellow-300">선택한 에고기프트</h4>
                                             <div className="flex items-center gap-2">
                                               <button
                                                 type="button"
@@ -3837,7 +5628,7 @@ function FavoritesPageClient() {
                                             </div>
                                           )}
                                         </div>
-                                        <div className="border-t border-[#b8860b]/30 pt-4 mt-2">
+                                        <div ref={shareBoardDetailCommentsSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-5">
                                           <div className="mb-2 flex items-center justify-between gap-2">
                                             <div className="text-sm font-semibold text-yellow-300">
                                               댓글 ({shareBoardComments.filter((c) => c.deletedYn !== "Y").length})
@@ -3860,23 +5651,27 @@ function FavoritesPageClient() {
                                             </button>
                                           </div>
                                           <div className="space-y-3">
-                                            <div className="flex gap-2">
-                                              <input
-                                                type="text"
-                                                value={shareBoardCommentInput}
-                                                onChange={(e) => setShareBoardCommentInput(e.target.value)}
-                                                placeholder="댓글을 입력하세요"
-                                                className="flex-1 px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                                              />
-                                              <button
-                                                type="button"
-                                                onClick={() => submitShareBoardComment(shareBoardCommentInput)}
-                                                disabled={shareBoardCommentSubmitting}
-                                                className="px-3 py-2 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-500 disabled:opacity-50"
-                                              >
-                                                등록
-                                              </button>
-                                            </div>
+                                            {shareBoardAuthenticated ? (
+                                              <div className="flex gap-2">
+                                                <input
+                                                  type="text"
+                                                  value={shareBoardCommentInput}
+                                                  onChange={(e) => setShareBoardCommentInput(e.target.value)}
+                                                  placeholder="댓글을 입력하세요"
+                                                  className="flex-1 px-3 py-2 bg-[#2a2a2d] border border-[#b8860b]/30 rounded text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                                                />
+                                                <button
+                                                  type="button"
+                                                  onClick={() => submitShareBoardComment(shareBoardCommentInput)}
+                                                  disabled={shareBoardCommentSubmitting}
+                                                  className="px-3 py-2 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-500 disabled:opacity-50"
+                                                >
+                                                  등록
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <p className="text-xs text-gray-400">댓글 등록은 로그인 후 가능합니다.</p>
+                                            )}
                                             {shareBoardCommentsLoading ? (
                                               <p className="text-xs text-gray-400">댓글을 불러오는 중...</p>
                                             ) : (
@@ -3890,7 +5685,7 @@ function FavoritesPageClient() {
                                                       </div>
                                                       <p className="text-sm text-gray-200 whitespace-pre-wrap">{comment.content}</p>
                                                       <div className="mt-2 flex items-center gap-2 text-xs">
-                                                        {comment.deletedYn !== "Y" && (
+                                                        {shareBoardAuthenticated && comment.deletedYn !== "Y" && (
                                                           <button type="button" onClick={() => setShareBoardReplyParentId((prev) => (prev === comment.commentId ? null : comment.commentId))} className="text-cyan-300 hover:text-cyan-200">
                                                             답글
                                                           </button>
@@ -3901,7 +5696,7 @@ function FavoritesPageClient() {
                                                           </button>
                                                         )}
                                                       </div>
-                                                      {shareBoardReplyParentId === comment.commentId && (
+                                                      {shareBoardAuthenticated && shareBoardReplyParentId === comment.commentId && (
                                                         <div className="mt-2 flex gap-2">
                                                           <input
                                                             type="text"
@@ -4035,11 +5830,11 @@ function FavoritesPageClient() {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col lg:flex-row gap-6">
-              <div className="w-full lg:w-1/5 flex-shrink-0 order-1 lg:order-1 min-w-[240px]">
+            <div className="flex flex-col gap-6">
+              <div className="w-full flex-shrink-0 order-1 min-w-[240px]">
                 {favoritesPanel}
               </div>
-              <div className="flex-1 order-2 lg:order-2">
+              <div className="w-full order-2">
                 {activeTab === "result" && (
                   <div className="space-y-6">
                     {selectedFavoriteId === null ? (
@@ -4048,52 +5843,656 @@ function FavoritesPageClient() {
                       </div>
                     ) : (
                       <>
+                        <div ref={reportIdentitySectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-5 mb-4">
+                            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                              <h3 className="text-lg font-semibold text-yellow-300">인격/E.G.O 선택</h3>
+                              <ReportHelpTrigger sectionId="identity" onOpen={setReportSectionHelpId} />
+                            </div>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="inline-flex rounded-md border border-[#b8860b]/35 bg-[#1a1a1d] p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setReportIdentityTab("personality")}
+                                  className={`px-2.5 py-1 text-xs rounded ${
+                                    reportIdentityTab === "personality"
+                                      ? "bg-amber-500/25 text-amber-100"
+                                      : "text-gray-400 hover:bg-white/5"
+                                  }`}
+                                >
+                                  인격 선택
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setReportIdentityTab("ego")}
+                                  className={`px-2.5 py-1 text-xs rounded ${
+                                    reportIdentityTab === "ego"
+                                      ? "bg-amber-500/25 text-amber-100"
+                                      : "text-gray-400 hover:bg-white/5"
+                                  }`}
+                                >
+                                  E.G.O 선택
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => void captureReportIdentitySectionAsImage()}
+                                  className="px-2.5 py-1 text-xs rounded border border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/15"
+                                >
+                                  이미지 다운로드
+                                </button>
+                                {reportIdentityTab === "personality" ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={resetFormationOrders}
+                                      className="px-2.5 py-1 text-xs rounded border border-[#b8860b]/35 text-amber-100 hover:bg-amber-500/20"
+                                    >
+                                      편성 순서 초기화
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={clearAllIdentitySlots}
+                                      className="px-2.5 py-1 text-xs rounded border border-red-400/35 text-red-200 hover:bg-red-500/15"
+                                    >
+                                      인격 전체 선택 해제
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={clearAllIdentitySlots}
+                                    className="px-2.5 py-1 text-xs rounded border border-red-400/35 text-red-200 hover:bg-red-500/15"
+                                  >
+                                    E.G.O 전체 선택 해제
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            {reportIdentityTab === "personality" && (
+                              <div className="mb-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+                                <div className="rounded border border-emerald-500/30 bg-emerald-900/10 px-2 py-2">
+                                  <div className="mb-1 text-[11px] text-emerald-200/90">편성 인격 키워드</div>
+                                  {reportPersonalityFormationKeywordCounts.length === 0 ? (
+                                    <p className="text-[11px] text-gray-500">아직 편성된 인격이 없습니다.</p>
+                                  ) : (
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      {reportPersonalityFormationKeywordCounts.map((row) => (
+                                        <div
+                                          key={`report-formation-kw-count-${row.keyword}`}
+                                          className="inline-flex items-center gap-1 rounded border border-emerald-400/25 bg-[#151b18] px-1.5 py-1"
+                                        >
+                                          <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                          <span className="text-[11px] text-emerald-100">{row.count}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div className="mt-2 border-t border-emerald-500/25 pt-2">
+                                    <div className="mb-1 text-[11px] text-emerald-200/90">속성별 최대 획득 가능 자원 ( 1 라운드 기준 / 집중 전투 )</div>
+                                    {reportFormationRound1AcquirableResources.length === 0 ? (
+                                      <p className="text-[11px] text-gray-500">편성 인격이 없거나 조건에 맞는 스킬이 없습니다.</p>
+                                    ) : (
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        {reportFormationRound1AcquirableResources.map((row) => (
+                                          <div
+                                            key={`report-round1-res-${row.name}`}
+                                            className="inline-flex items-center gap-1 rounded border border-emerald-400/30 bg-[#151b18] px-1.5 py-1"
+                                          >
+                                            <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                            <span className="text-[11px] text-emerald-100 tabular-nums">{row.count}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="rounded border border-[#b8860b]/25 bg-[#0f0f12] px-2 py-2">
+                                  <div className="mb-1 flex items-center justify-between gap-2">
+                                    <div className="text-[11px] text-gray-400">전체 인격 키워드</div>
+                                    <div />
+                                </div>
+                                {reportPersonalityKeywordCounts.length === 0 ? (
+                                  <p className="text-[11px] text-gray-500">아직 집계할 키워드가 없습니다.</p>
+                                ) : (
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {reportPersonalityKeywordCounts.map((row) => (
+                                      <div
+                                        key={`report-kw-count-${row.keyword}`}
+                                        className="inline-flex items-center gap-1 rounded border border-[#b8860b]/20 bg-[#151518] px-1.5 py-1"
+                                      >
+                                        <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                        <span className="text-[11px] text-gray-200">{row.count}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              </div>
+                            )}
+                            {reportIdentityTab === "ego" && (
+                              <div className="mb-3 rounded border border-sky-500/30 bg-sky-900/10 px-2 py-2">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <div className="text-[11px] text-sky-200/90">필요 자원</div>
+                                  <div />
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {reportEgoResourceCounts.map((row) => (
+                                    <div
+                                      key={`ego-resource-${row.name}`}
+                                      className="inline-flex items-center gap-1 rounded border border-sky-400/25 bg-[#151922] px-1.5 py-1"
+                                    >
+                                      <img src={row.iconPath} alt="" width={14} height={14} className="h-3.5 w-3.5 object-contain" />
+                                      <span className="text-[11px] text-sky-100">{row.value}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-6">
+                              {REPORT_PERSONALITY_OPTIONS.map((p, slotIndex) => {
+                                if (reportIdentityTab === "ego") {
+                                  const picked = reportEgoSlots[slotIndex]?.selectedByGrade ?? {};
+                                  const egoBackgroundImage =
+                                    REPORT_PERSONALITY_ICON_BACKGROUND_BY_ORDER[p.order] ?? p.image;
+                                  return (
+                                    <button
+                                      key={p.order}
+                                      type="button"
+                                      onClick={() => void openEgoPicker(slotIndex)}
+                                      className="flex min-w-0 w-full flex-col overflow-hidden rounded-lg border border-[#b8860b]/40 bg-[#1a1a1d] text-left hover:border-[#d4af37]/50 transition-colors"
+                                    >
+                                      <div className="relative flex h-[126px] sm:h-[158px] w-full items-center justify-center bg-[#111] shrink-0 overflow-hidden">
+                                        <img
+                                          src={egoBackgroundImage}
+                                          alt=""
+                                          className="block h-auto w-auto max-h-full max-w-full object-contain object-center opacity-55"
+                                        />
+                                      </div>
+                                      <div className="min-h-[5rem] border-t border-[#b8860b]/25 px-1.5 py-2">
+                                        <div className="text-[18px] sm:text-[20px] text-gray-100 font-semibold text-center line-clamp-1 mb-1.5">
+                                          {p.name}
+                                        </div>
+                                        <div className="space-y-1">
+                                          {REPORT_EGO_GRADE_ORDER.map((grade) => (
+                                            <div key={`${p.order}-${grade}`} className="flex items-center gap-1.5 text-[16px] sm:text-[18px] leading-tight">
+                                              <span className="w-16 shrink-0 text-amber-300/90 font-semibold">{grade}</span>
+                                              <span className="min-w-0 truncate text-gray-200">{picked[grade]?.title ?? "-"}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                }
+                                const slot = activeReportIdentitySlots[slotIndex] ?? null;
+                                const filled = slot != null && slot.imagePath;
+                                const hasBeforeSync = Boolean(slot?.beforeSyncImagePath);
+                                const hasAfterSync = Boolean(slot?.afterSyncImagePath);
+                                const hasBothSync = hasBeforeSync && hasAfterSync;
+                                return (
+                                  <div
+                                    key={p.order}
+                                    className={`flex min-w-0 w-full flex-col overflow-hidden rounded-lg border ${
+                                      filled
+                                        ? personalityGradeCardToneClass(slot?.grade)
+                                        : "border-[#b8860b]/40 bg-[#1a1a1d] hover:border-[#d4af37]/50"
+                                    }`}
+                                  >
+                                    <div className="group flex min-w-0 w-full flex-col text-left transition-colors">
+                                      <div
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={() => void openPersonalityPicker(slotIndex)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            void openPersonalityPicker(slotIndex);
+                                          }
+                                        }}
+                                        className="relative w-full aspect-[2/3] bg-[#111] shrink-0 overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/50"
+                                      >
+                                        {filled ? (
+                                          <img
+                                            src={`${RESULT_EGOGIFT_BASE_URL}${slot!.imagePath}`}
+                                            alt=""
+                                            className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                                          />
+                                        ) : (
+                                          <div
+                                            className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-45 transition-opacity group-hover:opacity-55"
+                                            style={{ backgroundImage: `url(${p.image})`, backgroundPosition: "center 18%" }}
+                                            aria-hidden
+                                          />
+                                        )}
+                                        {!filled ? (
+                                          <div className="absolute inset-0 flex items-end justify-center pb-1 bg-gradient-to-t from-black/70 to-transparent pointer-events-none">
+                                            <span className="text-[12px] text-yellow-200/90 font-medium px-1">탭하여 선택</span>
+                                          </div>
+                                        ) : null}
+                                        {filled ? (
+                                          <div className="absolute inset-0 flex flex-col bg-black/25 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                void openPersonalityPicker(slotIndex);
+                                              }}
+                                              className="h-[30%] border-b border-[#b8860b]/25 bg-black/30 text-[10px] sm:text-xs font-semibold text-gray-300 transition-colors hover:bg-amber-500/35 hover:text-amber-100"
+                                            >
+                                              인격 변경
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleFormationForSlot(slotIndex);
+                                              }}
+                                              className={`h-[70%] bg-black/20 text-[10px] sm:text-xs font-semibold text-gray-300 transition-colors ${
+                                                slot?.formationOrder
+                                                  ? "hover:bg-red-500/35 hover:text-red-100"
+                                                  : "hover:bg-amber-500/35 hover:text-amber-100"
+                                              }`}
+                                            >
+                                              {slot?.formationOrder ? "편성 해제" : "인격 편성"}
+                                            </button>
+                                          </div>
+                                        ) : null}
+                                        {filled && slot?.formationOrder ? (
+                                          <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-black/15">
+                                            <span className={`text-3xl sm:text-4xl md:text-5xl xl:text-6xl font-extrabold drop-shadow-[0_2px_6px_rgba(0,0,0,0.8)] ${
+                                              slot.formationOrder <= 7 ? "text-yellow-300" : "text-cyan-300"
+                                            }`}>
+                                              {slot.formationOrder}
+                                            </span>
+                                          </div>
+                                        ) : null}
+                                        {filled ? (
+                                          <div className="pointer-events-none absolute bottom-0.5 right-0.5 z-[6] flex flex-wrap items-end justify-end gap-px rounded bg-black/35 p-px sm:bottom-1 sm:right-1 sm:gap-0.5 sm:p-0.5">
+                                            {getPersonalityKeywordIconPaths(slot?.keywords).map((src, ki) => (
+                                              <img
+                                                key={`${slot?.personalityId ?? p.order}-slot-kw-overlay-${ki}`}
+                                                src={src}
+                                                alt=""
+                                                width={32}
+                                                height={32}
+                                                className="h-5 w-5 shrink-0 object-contain sm:h-6 sm:w-6 lg:h-7 lg:w-7 xl:h-8 xl:w-8"
+                                              />
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                      <span className="flex flex-col items-center justify-center gap-0.5 border-t border-[#b8860b]/25 px-0.5 py-1.5 text-center leading-snug">
+                                        <span className="flex min-h-[2.5rem] sm:min-h-[2.75rem] w-full items-center justify-center">
+                                          <span className="line-clamp-2 w-full text-center text-[12px] sm:text-[14px] text-gray-200">
+                                            {filled ? slot!.name : p.name}
+                                          </span>
+                                        </span>
+                                      </span>
+                                    </div>
+                                    {filled && hasBothSync ? (
+                                      <div className="flex flex-col gap-1.5 shrink-0 border-t border-[#b8860b]/20 bg-[#0f0f12] px-1 py-1 lg:flex-row lg:items-stretch lg:gap-1">
+                                        <div className="relative order-1 w-full shrink-0 lg:order-2 lg:w-5 lg:self-stretch">
+                                          <button
+                                            type="button"
+                                            className="flex w-full shrink-0 items-center justify-center rounded border border-[#b8860b]/25 bg-[#1a1a1d] px-3 py-1.5 text-[15px] leading-none text-gray-300 hover:bg-[#232327] lg:h-full lg:px-0 lg:py-0"
+                                            aria-label="옵션 메뉴"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSkillPresetMenuSlotIndex((prev) => (prev === slotIndex ? null : slotIndex));
+                                            }}
+                                          >
+                                            <span className="lg:hidden tracking-[0.65em] text-gray-200" aria-hidden>
+                                              ⋯
+                                            </span>
+                                            <span className="hidden lg:flex lg:h-full lg:w-full lg:items-center lg:justify-center text-gray-200" aria-hidden>
+                                              ⋮
+                                            </span>
+                                          </button>
+                                          {skillPresetMenuSlotIndex === slotIndex ? (
+                                            <div className="absolute left-1/2 bottom-full z-[40] mb-1.5 w-[88px] -translate-x-1/2 rounded border border-[#b8860b]/35 bg-[#1a1a1d] p-1 shadow-lg lg:left-auto lg:right-0 lg:translate-x-0">
+                                              {(["105", "015", "051", "114", "042"] as const).map((preset) => (
+                                                <button
+                                                  key={`skill-preset-${slotIndex}-${preset}`}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setReportPersonalitySlots((prev) => {
+                                                      const next = [...prev];
+                                                      const cur = next[slotIndex];
+                                                      if (!cur) return prev;
+                                                      next[slotIndex] = {
+                                                        ...cur,
+                                                        skillInputValues: [preset[0], preset[1], preset[2]],
+                                                      };
+                                                      return next;
+                                                    });
+                                                    setSkillPresetMenuSlotIndex(null);
+                                                  }}
+                                                  className="mb-1 last:mb-0 h-7 w-full rounded border border-[#b8860b]/25 bg-[#131316] text-[10px] font-semibold text-amber-100 hover:bg-amber-500/20"
+                                                >
+                                                  {preset}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                        <div className="order-2 flex min-w-0 flex-1 items-center gap-1 lg:order-1">
+                                        {[0, 1, 2].map((idx) => {
+                                          const attrColor = getSkillAttributeBorderColor(slot?.skillAttributes, idx);
+                                          return (
+                                          <div
+                                            key={`slot-skill-input-wrap-${slotIndex}-${idx}`}
+                                            className="min-w-0 flex-1 flex flex-col items-center gap-0.5 rounded border p-0.5"
+                                            style={{
+                                              borderColor: attrColor,
+                                              backgroundColor: colorWithAlpha(attrColor, 0.1),
+                                            }}
+                                          >
+                                            {(() => {
+                                              const iconPath = getSkillAttackTypeIconPath(slot?.skillAttackTypes, idx);
+                                              return iconPath ? (
+                                                <img
+                                                  src={iconPath}
+                                                  alt=""
+                                                  width={28}
+                                                  height={28}
+                                                  className="h-7 w-7 object-contain"
+                                                />
+                                              ) : (
+                                                <span className="h-7 w-7" aria-hidden />
+                                              );
+                                            })()}
+                                            <input
+                                              type="text"
+                                              className="h-7 min-w-0 w-full rounded border border-[#b8860b]/25 bg-[#1a1a1d] px-1 text-[14px] font-semibold text-center text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-yellow-400/60"
+                                              placeholder={`입력${idx + 1}`}
+                                              value={slot?.skillInputValues?.[idx] ?? (filled ? (idx === 0 ? "3" : idx === 1 ? "2" : "1") : "")}
+                                              onChange={(e) =>
+                                                setReportPersonalitySlots((prev) => {
+                                                  const next = [...prev];
+                                                  const cur = next[slotIndex];
+                                                  if (!cur) return prev;
+                                                  const values = [...(cur.skillInputValues ?? ["3", "2", "1"])];
+                                                  values[idx] = e.target.value;
+                                                  next[slotIndex] = { ...cur, skillInputValues: values.slice(0, 3) };
+                                                  return next;
+                                                })
+                                              }
+                                            />
+                                          </div>
+                                        )})}
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        {portalMounted &&
+                          egoPickerSlotIndex != null &&
+                          createPortal(
+                            <div
+                              className="fixed inset-0 z-[231] flex items-center justify-center p-4 bg-black/80"
+                              role="dialog"
+                              aria-modal="true"
+                              aria-labelledby="ego-picker-title"
+                              onClick={() => setEgoPickerSlotIndex(null)}
+                            >
+                              <div
+                                className="relative flex max-h-[min(92vh,900px)] w-full max-w-[min(72rem,calc(100vw-1.5rem))] flex-col rounded-xl border border-[#b8860b]/50 bg-[#131316] shadow-xl overflow-hidden"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="flex items-start justify-between gap-2 border-b border-[#b8860b]/40 px-4 py-3 shrink-0">
+                                  <div>
+                                    <h4 id="ego-picker-title" className="text-xl font-semibold text-yellow-300">
+                                      {REPORT_PERSONALITY_OPTIONS[egoPickerSlotIndex].name} 에고 목록
+                                    </h4>
+                                  </div>
+                                  <div className="shrink-0 flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={applyEgoPickerSelection}
+                                      className="px-2 py-1 text-[13px] sm:text-sm text-emerald-200 rounded border border-emerald-400/40 hover:bg-emerald-500/15"
+                                    >
+                                      등록
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={clearAllEgoPickerSelection}
+                                      className="px-2 py-1 text-[13px] sm:text-sm text-red-200 rounded border border-red-400/30 hover:bg-red-500/15"
+                                    >
+                                      전체 선택 해제
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEgoPickerSlotIndex(null)}
+                                      className="px-2 py-1 text-gray-400 hover:text-white rounded border border-transparent hover:border-[#b8860b]/40"
+                                      aria-label="닫기"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto px-3 py-3 sm:px-4 min-h-0">
+                                  {egoPickerLoading ? (
+                                    <p className="text-gray-400 text-sm text-center py-8">불러오는 중…</p>
+                                  ) : egoPickerError ? (
+                                    <p className="text-red-300 text-sm text-center py-8">{egoPickerError}</p>
+                                  ) : (
+                                    <div className="space-y-4">
+                                      {REPORT_EGO_GRADE_ORDER.map((grade) => (
+                                        <section key={`ego-grade-${grade}`} className="rounded border border-[#b8860b]/25 bg-[#0f0f12]">
+                                          <div className="px-3 py-2 border-b border-[#b8860b]/20">
+                                            {EGO_GRADE_LABEL_ICON_MAP[grade] ? (
+                                              <img
+                                                src={EGO_GRADE_LABEL_ICON_MAP[grade]}
+                                                alt={grade}
+                                                className="h-5 w-auto object-contain"
+                                              />
+                                            ) : (
+                                              <span className="text-xs font-semibold text-amber-200">{grade}</span>
+                                            )}
+                                          </div>
+                                          <div className="p-3 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+                                            {(egoPickerGroupedByGrade[grade] ?? []).map((row) => {
+                                              const selected = egoPickerSelectedByGrade[grade]?.egoId === row.egoId;
+                                              const imagePath = extractPathFromUnknownImage(row.image);
+                                              return (
+                                                <button
+                                                  key={row.egoId}
+                                                  type="button"
+                                                  onClick={() => toggleEgoPickerSelection(row)}
+                                                  className={`flex flex-col items-center gap-1 rounded-md border px-2 py-2 transition-colors ${
+                                                    selected
+                                                      ? "border-yellow-400/70 bg-yellow-500/15"
+                                                      : "border-[#b8860b]/30 bg-[#1a1a1d] hover:border-[#d4af37]/50"
+                                                  }`}
+                                                >
+                                                  <div className={`h-40 w-40 overflow-hidden rounded-full border ${selected ? "border-yellow-400/80" : "border-[#b8860b]/40"}`}>
+                                                    {imagePath ? (
+                                                      <img
+                                                        src={`${RESULT_EGOGIFT_BASE_URL}${imagePath}`}
+                                                        alt=""
+                                                        className="h-full w-full object-cover"
+                                                      />
+                                                    ) : (
+                                                      <div className="h-full w-full flex items-center justify-center text-[10px] text-gray-600">이미지 없음</div>
+                                                    )}
+                                                  </div>
+                                                  <span className="line-clamp-2 text-center text-[20px] sm:text-[22px] text-gray-100">
+                                                    {row.title}
+                                                  </span>
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        </section>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>,
+                            document.body
+                          )}
+                        {portalMounted &&
+                          personalityPickerSlotIndex != null &&
+                          createPortal(
+                            <div
+                              className="fixed inset-0 z-[230] flex items-center justify-center p-4 bg-black/80"
+                              role="dialog"
+                              aria-modal="true"
+                              aria-labelledby="personality-picker-title"
+                              onClick={() => setPersonalityPickerSlotIndex(null)}
+                            >
+                              <div
+                                className="relative flex max-h-[min(92vh,900px)] w-full max-w-[min(72rem,calc(100vw-1.5rem))] flex-col rounded-xl border border-[#b8860b]/50 bg-[#131316] shadow-xl overflow-hidden"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="flex items-start justify-between gap-2 border-b border-[#b8860b]/40 px-4 py-3 shrink-0">
+                                  <div>
+                                    <h4 id="personality-picker-title" className="text-lg font-semibold text-yellow-300">
+                                      {REPORT_PERSONALITY_OPTIONS[personalityPickerSlotIndex].name} 인격 목록
+                                    </h4>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                      카드(세로)를 눌러 인격을 교체합니다. 썸네일 기본은 동기화 후입니다.
+                                    </p>
+                                  </div>
+                                  <div className="shrink-0 flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={clearPersonalityFromPicker}
+                                      className="px-2 py-1 text-[11px] sm:text-xs text-red-200/90 rounded border border-red-400/30 hover:bg-red-500/15 hover:text-red-100"
+                                    >
+                                      선택 해제
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPersonalityPickerSlotIndex(null)}
+                                      className="px-2 py-1 text-gray-400 hover:text-white rounded border border-transparent hover:border-[#b8860b]/40"
+                                      aria-label="닫기"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto px-3 py-3 sm:px-4 min-h-0">
+                                  {personalityPickerLoading ? (
+                                    <p className="text-gray-400 text-sm text-center py-8">불러오는 중…</p>
+                                  ) : personalityPickerError ? (
+                                    <p className="text-red-300 text-sm text-center py-8">{personalityPickerError}</p>
+                                  ) : personalityPickerList.length === 0 ? (
+                                    <p className="text-gray-500 text-sm text-center py-8">등록된 인격이 없습니다.</p>
+                                  ) : (
+                                    <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-6">
+                                      {personalityPickerList.map((row) => {
+                                        const hasBefore = Boolean(row.beforeSyncImage?.path);
+                                        const hasAfter = Boolean(row.afterSyncImage?.path);
+                                        const explicit = personalityPickerShowAfter[row.personalityId];
+                                        const useAfterThumb =
+                                          hasBefore && hasAfter
+                                            ? explicit !== false
+                                            : hasAfter
+                                              ? true
+                                              : false;
+                                        const thumbPath =
+                                          (useAfterThumb ? row.afterSyncImage?.path : row.beforeSyncImage?.path) ??
+                                          row.afterSyncImage?.path ??
+                                          row.beforeSyncImage?.path ??
+                                          "";
+                                        return (
+                                          <div
+                                            key={row.personalityId}
+                                            className={`flex min-w-0 flex-col overflow-hidden rounded-lg border ${personalityGradeCardToneClass(row.grade)}`}
+                                          >
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                applyPersonalityFromPicker(
+                                                  personalityPickerSlotIndex,
+                                                  row,
+                                                  useAfterThumb
+                                                )
+                                              }
+                                              className="group flex min-w-0 w-full flex-1 flex-col text-left outline-none transition-colors hover:bg-[#232328] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-yellow-400/50"
+                                            >
+                                              <div className="relative w-full aspect-[2/3] shrink-0 overflow-hidden bg-[#111]">
+                                                {thumbPath ? (
+                                                  <img
+                                                    src={`${RESULT_EGOGIFT_BASE_URL}${thumbPath}`}
+                                                    alt=""
+                                                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                                                  />
+                                                ) : (
+                                                  <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-600 px-1 text-center">
+                                                    이미지 없음
+                                                  </div>
+                                                )}
+                                              </div>
+                                              <div className="flex flex-col items-center justify-center gap-0.5 border-t border-[#b8860b]/25 px-1 py-2 text-center">
+                                                <span className="text-[10px] sm:text-xs font-semibold text-amber-200/90 tabular-nums">
+                                                  [{row.grade}성]
+                                                </span>
+                                                <span className="line-clamp-3 w-full text-[10px] sm:text-[11px] leading-snug text-gray-100">
+                                                  {row.name}
+                                                </span>
+                                                <div className="flex min-h-[18px] w-full flex-wrap items-center justify-center gap-0.5">
+                                                  {getPersonalityKeywordIconPaths(row.keywords).map((src, ki) => (
+                                                    <img
+                                                      key={`${row.personalityId}-kw-${ki}`}
+                                                      src={src}
+                                                      alt=""
+                                                      width={18}
+                                                      height={18}
+                                                      className="h-4 w-4 shrink-0 object-contain sm:h-[18px] sm:w-[18px]"
+                                                    />
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            </button>
+                                            {null}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>,
+                            document.body
+                          )}
                         {selectedReportSchemaVersion === 2 && (
-                          <div ref={v2PlannedCardPacksSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 mb-4 overflow-visible pb-10">
-                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#b8860b]/40 pb-3 mb-4">
-                              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                          <div
+                            ref={v2PlannedCardPacksSectionRef}
+                            className={`bg-[#131316] border border-[#b8860b]/40 rounded-lg mb-4 overflow-visible ${v2PlannedSectionSimplified ? "p-3 md:p-4 pb-6" : "p-4 md:p-6 pb-10"}`}
+                          >
+                            <div className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-2 border-b border-[#b8860b]/40 pb-3">
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => void captureV2PlannedCardPacksSectionAsImage()}
-                                  className="text-base md:text-lg font-semibold text-yellow-200/90 text-left cursor-pointer hover:text-yellow-100 hover:underline focus:outline-none focus:underline rounded px-0 py-0 min-w-0"
+                                  className="min-w-0 cursor-pointer rounded px-0 py-0 text-left text-lg font-semibold text-yellow-300 hover:text-yellow-100 hover:underline focus:outline-none focus:underline"
                                   title="클릭 시 진행(예정) 카드팩 목록 영역 전체를 이미지로 저장"
                                 >
                                   진행(예정) 카드팩 목록
                                 </button>
-                                <span className="relative z-[2147483647] isolate inline-flex shrink-0 group">
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-500 bg-red-950/70 text-[11px] font-bold leading-none text-red-300 shadow-sm hover:bg-red-900/80 hover:text-red-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
-                                    aria-label="진행 예정 카드팩 사용 안내"
-                                    aria-describedby="v2-planned-cardpack-help-tooltip"
-                                  >
-                                    ?
-                                  </button>
-                                  <div
-                                    id="v2-planned-cardpack-help-tooltip"
-                                    role="tooltip"
-                                    className="pointer-events-none absolute left-1/2 bottom-[calc(100%+8px)] z-[2147483647] w-max max-w-[min(20rem,calc(100vw-3rem))] -translate-x-1/2 rounded-xl border border-[#b8860b]/50 bg-[#1a1a1f] px-3 py-2.5 text-left text-[11px] sm:text-xs leading-snug text-gray-200 shadow-[0_8px_24px_rgba(0,0,0,0.55)] opacity-0 transition-opacity duration-200 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible"
-                                  >
-                                    <div className="flex flex-col gap-2">
-                                      <p>1행 1~5층, 추가 시 2행 6~10층·3행 11~15층입니다.</p>
-                                      <p>각 층 칸을 눌러 출현 카드팩을 고릅니다.</p>
-                                      <p>
-                                        변경 후 상단 <strong className="text-yellow-200/90">저장</strong>을 눌러주세요.
-                                      </p>
-                                    </div>
-                                    {/* 말풍선 꼬리 */}
-                                    <span
-                                      className="absolute left-1/2 top-full -translate-x-1/2 -mt-px block h-0 w-0 border-x-[8px] border-x-transparent border-t-[8px] border-t-[#b8860b]/50"
-                                      aria-hidden
-                                    />
-                                    <span
-                                      className="absolute left-1/2 top-full -translate-x-1/2 mt-[-6px] block h-0 w-0 border-x-[7px] border-x-transparent border-t-[7px] border-t-[#1a1a1f]"
-                                      aria-hidden
-                                    />
-                                  </div>
-                                </span>
+                                <ReportHelpTrigger sectionId="cardpackPlanned" onOpen={setReportSectionHelpId} />
                               </div>
-                              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                              <div className="ml-auto flex w-full min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => setV2PlannedSectionSimplified((v) => !v)}
+                                  className={`px-2.5 py-1.5 text-xs sm:text-sm rounded border transition-colors flex items-center gap-1 ${
+                                    v2PlannedSectionSimplified
+                                      ? "text-cyan-300 border-cyan-400/60 bg-cyan-500/20 hover:bg-cyan-500/30"
+                                      : "text-gray-300 border-gray-400/40 hover:bg-white/10"
+                                  }`}
+                                  title={v2PlannedSectionSimplified ? "슬롯·여백을 기본 크기로" : "슬롯·여백을 줄여 한 화면에 더 많이"}
+                                  aria-pressed={v2PlannedSectionSimplified}
+                                >
+                                  {v2PlannedSectionSimplified ? "간소화 해제" : "간소화"}
+                                </button>
                                 <button
                                   type="button"
                                   onClick={addV2PlannedFloorRow}
@@ -4112,126 +6511,211 @@ function FavoritesPageClient() {
                                 >
                                   마지막 행 삭제
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setV2PlannedSectionExpanded((prev) => {
+                                      if (prev) setV2FloorModalFloor(null);
+                                      return !prev;
+                                    });
+                                  }}
+                                  className="shrink-0 rounded p-1 text-yellow-200/80 transition-colors hover:bg-white/10 hover:text-yellow-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
+                                  aria-expanded={v2PlannedSectionExpanded}
+                                  title={v2PlannedSectionExpanded ? "접기" : "펼치기"}
+                                  aria-label={v2PlannedSectionExpanded ? "접기" : "펼치기"}
+                                >
+                                  <span
+                                    className={`inline-block transition-transform duration-200 ${v2PlannedSectionExpanded ? "rotate-90" : ""}`}
+                                    aria-hidden
+                                  >
+                                    ▶
+                                  </span>
+                                </button>
                               </div>
                             </div>
+                            {v2PlannedSectionExpanded && (
+                            <>
                             {plannableCardPacksLoading ? (
                               <p className="text-gray-400 text-sm mb-3">카드팩 목록을 불러오는 중…</p>
                             ) : plannableCardPacks.length === 0 ? (
                               <p className="text-gray-400 text-sm mb-3">카드팩 목록을 불러올 수 없습니다.</p>
                             ) : null}
-                            <div className="min-h-[120px] rounded-lg border border-[#b8860b]/30 bg-[#0d0d0f]/50 p-3 md:p-3 lg:p-4 overflow-visible">
-                              <div className="w-full space-y-3 sm:space-y-4">
-                                {V2_FLOOR_ROWS.slice(0, v2PlannedFloorRowCount).map((rowFloors, rowIdx) => (
-                                  <div
-                                    key={rowIdx}
-                                    className="w-full grid grid-cols-5 gap-1.5 sm:gap-2 md:gap-2 lg:gap-3"
-                                  >
-                                    {rowFloors.map((floor) => {
-                                      const packId = checkedCardPackByFloor[floor];
-                                      const pack = packId
-                                        ? plannableCardPacks.find((p) => p.cardpackId === packId)
-                                        : undefined;
-                                      const slotDiff = pack ? plannedCardPackDifficultyByFloor[floor] : undefined;
-                                      const borderCls =
-                                        pack && slotDiff
-                                          ? v2SlotBorderClass(slotDiff)
-                                          : "border-[#b8860b]/50 hover:border-yellow-400/60";
-                                      const floorTitle =
-                                        pack && slotDiff
-                                          ? `${floor}층 - ${v2DifficultySlotLabel(slotDiff)}`
-                                          : `${floor}층`;
-                                      const slotDisabled = plannableCardPacksLoading || plannableCardPacks.length === 0;
-                                      return (
-                                        <div
-                                          key={floor}
-                                          role="button"
-                                          tabIndex={slotDisabled ? -1 : 0}
-                                          onClick={() => {
-                                            if (slotDisabled) return;
-                                            setV2FloorModalFloor(floor);
-                                          }}
-                                          onKeyDown={(e) => {
-                                            if (slotDisabled) return;
-                                            if (e.key === "Enter" || e.key === " ") {
-                                              e.preventDefault();
+                            <div
+                              className={`min-h-[120px] rounded-lg border border-[#b8860b]/30 bg-[#0d0d0f]/50 overflow-visible ${
+                                v2PlannedSectionSimplified ? "p-2 sm:p-2.5" : "p-3 md:p-3 lg:p-4"
+                              }`}
+                            >
+                              {v2PlannedSectionSimplified ? (
+                                <div className="w-full space-y-3">
+                                  {V2_FLOOR_ROWS.slice(0, v2PlannedFloorRowCount).map((rowFloors, rowIdx) => (
+                                    <div key={rowIdx} className="space-y-1.5">
+                                      {rowFloors.map((floor) => {
+                                        const packId = checkedCardPackByFloor[floor];
+                                        const pack = packId
+                                          ? plannableCardPacks.find((p) => p.cardpackId === packId)
+                                          : undefined;
+                                        const slotDiff = pack
+                                          ? plannedCardPackDifficultyByFloor[floor]
+                                          : undefined;
+                                        const borderCls =
+                                          pack && slotDiff
+                                            ? v2SlotBorderClass(slotDiff)
+                                            : "border-[#b8860b]/45 hover:border-[#d4af37]/55";
+                                        const slotDisabled = plannableCardPacksLoading || plannableCardPacks.length === 0;
+                                        const diffLabel = slotDiff ? v2DifficultySlotLabel(slotDiff) : "";
+                                        const diffTextCls = v2DifficultyLineTextClass(slotDiff);
+                                        return (
+                                          <button
+                                            key={floor}
+                                            type="button"
+                                            disabled={slotDisabled}
+                                            onClick={() => {
+                                              if (slotDisabled) return;
                                               setV2FloorModalFloor(floor);
-                                            }
-                                          }}
-                                          className={`flex flex-col items-stretch rounded-lg border bg-[#131316]/80 transition-colors text-left min-h-[180px] sm:min-h-[200px] md:min-h-[220px] lg:min-h-[240px] outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] ${
-                                            slotDisabled ? "opacity-50 cursor-not-allowed pointer-events-none" : "cursor-pointer"
-                                          } ${borderCls}`}
-                                        >
-                                          <span className="text-center text-xs sm:text-sm md:text-base font-semibold text-yellow-200/90 py-1.5 md:py-2 border-b border-[#b8860b]/30 bg-[#131316] shrink-0 px-1 leading-tight">
-                                            {floorTitle}
-                                          </span>
-                                          <div className="relative flex-1 flex flex-col items-center justify-center p-1.5 min-h-[140px] sm:min-h-[160px] md:min-h-[170px]">
-                                            {plannableCardPacksLoading ? (
-                                              <span className="text-gray-500 text-sm text-center">…</span>
-                                            ) : pack ? (
+                                            }}
+                                            className={`w-full rounded-md border bg-[#131316]/90 px-2.5 py-2 text-left text-sm leading-snug outline-none transition-colors focus-visible:ring-2 focus-visible:ring-yellow-400/50 ${borderCls} ${
+                                              slotDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-[#1c1c21]"
+                                            }`}
+                                          >
+                                            <span className="tabular-nums text-gray-400">{floor}층 </span>
+                                            {pack && slotDiff ? (
                                               <>
-                                                <div className="aspect-[1/2] w-full max-w-[3.5rem] sm:max-w-[4.25rem] md:max-w-none mx-auto rounded overflow-hidden bg-[#1a1a1a] mb-1 shrink-0">
-                                                  {pack.thumbnail ? (
-                                                    <img
-                                                      src={RESULT_EGOGIFT_BASE_URL + pack.thumbnail}
-                                                      alt=""
-                                                      className="w-full h-full object-cover"
-                                                      onError={(e) => {
-                                                        (e.target as HTMLImageElement).style.display = "none";
-                                                      }}
-                                                    />
-                                                  ) : (
-                                                    <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 px-0.5 text-center">
-                                                      없음
-                                                    </div>
-                                                  )}
-                                                </div>
-                                                <p className="text-[10px] sm:text-xs md:text-sm text-gray-200 line-clamp-2 text-center leading-snug w-full mt-0.5">
-                                                  {pack.title}
-                                                </p>
-                                                {!slotDisabled && (
-                                                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center exclude-from-capture">
-                                                    <button
-                                                      type="button"
-                                                      className="pointer-events-auto rounded-full bg-black/55 p-1.5 sm:p-2 text-white shadow-lg border border-white/25 hover:bg-black/75 hover:scale-105 active:scale-95 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/80 z-10 exclude-from-capture"
-                                                      title="카드팩 정보"
-                                                      aria-label={`${pack.title} 카드팩 정보 보기`}
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        cardPackDetailOpenRef.current?.open(pack.cardpackId);
-                                                      }}
-                                                    >
-                                                      <svg
-                                                        xmlns="http://www.w3.org/2000/svg"
-                                                        className="w-4 h-4 sm:w-[1.15rem] sm:h-[1.15rem]"
-                                                        fill="none"
-                                                        viewBox="0 0 24 24"
-                                                        stroke="currentColor"
-                                                        strokeWidth={2}
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                        aria-hidden
-                                                      >
-                                                        <circle cx="11" cy="11" r="8" />
-                                                        <path d="m21 21-4.35-4.35" />
-                                                      </svg>
-                                                    </button>
-                                                  </div>
-                                                )}
+                                                <span className={diffTextCls}>({diffLabel})</span>
+                                                <span className="text-gray-500"> - </span>
+                                                <span className="break-words text-gray-100">{pack.title}</span>
                                               </>
                                             ) : (
-                                              <span className="text-gray-500 text-xs sm:text-sm text-center px-1 leading-snug">
-                                                비어 있음
-                                                <br />
-                                                <span className="text-gray-600 text-[11px] sm:text-xs">탭하여 선택</span>
+                                              <span className="text-gray-500">
+                                                {pack && !slotDiff ? (
+                                                  <>
+                                                    <span className="text-gray-500">— </span>
+                                                    <span className="break-words text-gray-200">{pack.title}</span>
+                                                  </>
+                                                ) : (
+                                                  "비어 있음 · 탭하여 선택"
+                                                )}
                                               </span>
                                             )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="w-full space-y-3 sm:space-y-4">
+                                  {V2_FLOOR_ROWS.slice(0, v2PlannedFloorRowCount).map((rowFloors, rowIdx) => (
+                                    <div
+                                      key={rowIdx}
+                                      className="grid w-full grid-cols-5 gap-1.5 sm:gap-2 md:gap-2 lg:gap-3"
+                                    >
+                                      {rowFloors.map((floor) => {
+                                        const packId = checkedCardPackByFloor[floor];
+                                        const pack = packId
+                                          ? plannableCardPacks.find((p) => p.cardpackId === packId)
+                                          : undefined;
+                                        const slotDiff = pack ? plannedCardPackDifficultyByFloor[floor] : undefined;
+                                        const borderCls =
+                                          pack && slotDiff
+                                            ? v2SlotBorderClass(slotDiff)
+                                            : "border-[#b8860b]/50 hover:border-yellow-400/60";
+                                        const floorTitle =
+                                          pack && slotDiff
+                                            ? `${floor}층 - ${v2DifficultySlotLabel(slotDiff)}`
+                                            : `${floor}층`;
+                                        const slotDisabled = plannableCardPacksLoading || plannableCardPacks.length === 0;
+                                        return (
+                                          <div
+                                            key={floor}
+                                            role="button"
+                                            tabIndex={slotDisabled ? -1 : 0}
+                                            onClick={() => {
+                                              if (slotDisabled) return;
+                                              setV2FloorModalFloor(floor);
+                                            }}
+                                            onKeyDown={(e) => {
+                                              if (slotDisabled) return;
+                                              if (e.key === "Enter" || e.key === " ") {
+                                                e.preventDefault();
+                                                setV2FloorModalFloor(floor);
+                                              }
+                                            }}
+                                            className={`flex min-h-[180px] flex-col items-stretch rounded-lg border bg-[#131316]/80 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] sm:min-h-[200px] md:min-h-[220px] lg:min-h-[240px] ${
+                                              slotDisabled ? "pointer-events-none cursor-not-allowed opacity-50" : "cursor-pointer"
+                                            } ${borderCls}`}
+                                          >
+                                            <span className="shrink-0 border-b border-[#b8860b]/30 bg-[#131316] px-1 py-1.5 text-center text-xs font-semibold leading-tight text-yellow-200/90 sm:py-2 md:text-base">
+                                              {floorTitle}
+                                            </span>
+                                            <div className="relative flex min-h-[140px] flex-1 flex-col items-center justify-center p-1.5 sm:min-h-[160px] md:min-h-[170px]">
+                                              {plannableCardPacksLoading ? (
+                                                <span className="text-center text-sm text-gray-500">…</span>
+                                              ) : pack ? (
+                                                <>
+                                                  <div className="mb-1 aspect-[1/2] w-full max-w-[3.5rem] shrink-0 overflow-hidden rounded bg-[#1a1a1a] sm:max-w-[4.25rem] md:max-w-none">
+                                                    {pack.thumbnail ? (
+                                                      <img
+                                                        src={RESULT_EGOGIFT_BASE_URL + pack.thumbnail}
+                                                        alt=""
+                                                        className="h-full w-full object-cover"
+                                                        onError={(e) => {
+                                                          (e.target as HTMLImageElement).style.display = "none";
+                                                        }}
+                                                      />
+                                                    ) : (
+                                                      <div className="flex h-full w-full items-center justify-center px-0.5 text-center text-[10px] text-gray-500">
+                                                        없음
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                  <p className="mt-0.5 w-full line-clamp-2 text-center text-[10px] leading-snug text-gray-200 sm:text-xs md:text-sm">
+                                                    {pack.title}
+                                                  </p>
+                                                  {!slotDisabled && (
+                                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center exclude-from-capture">
+                                                      <button
+                                                        type="button"
+                                                        className="pointer-events-auto rounded-full border border-white/25 bg-black/55 p-1.5 text-white shadow-lg transition-all hover:scale-105 hover:bg-black/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/80 active:scale-95 sm:p-2 exclude-from-capture"
+                                                        title="카드팩 정보"
+                                                        aria-label={`${pack.title} 카드팩 정보 보기`}
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          cardPackDetailOpenRef.current?.open(pack.cardpackId);
+                                                        }}
+                                                      >
+                                                        <svg
+                                                          xmlns="http://www.w3.org/2000/svg"
+                                                          className="h-4 w-4 sm:h-[1.15rem] sm:w-[1.15rem]"
+                                                          fill="none"
+                                                          viewBox="0 0 24 24"
+                                                          stroke="currentColor"
+                                                          strokeWidth={2}
+                                                          strokeLinecap="round"
+                                                          strokeLinejoin="round"
+                                                          aria-hidden
+                                                        >
+                                                          <circle cx="11" cy="11" r="8" />
+                                                          <path d="m21 21-4.35-4.35" />
+                                                        </svg>
+                                                      </button>
+                                                    </div>
+                                                  )}
+                                                </>
+                                              ) : (
+                                                <span className="px-1 text-center text-xs leading-snug text-gray-500 sm:text-sm">
+                                                  비어 있음
+                                                  <br />
+                                                  <span className="text-[11px] text-gray-600 sm:text-xs">탭하여 선택</span>
+                                                </span>
+                                              )}
+                                            </div>
                                           </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                ))}
-                              </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                             {portalMounted &&
                               v2FloorModalFloor != null &&
@@ -4249,7 +6733,7 @@ function FavoritesPageClient() {
                                   >
                                     <div className="flex items-start justify-between gap-2 px-4 py-3 border-b border-[#b8860b]/40 shrink-0">
                                       <div>
-                                        <h4 id="v2-floor-modal-title" className="text-lg font-semibold text-yellow-200">
+                                        <h4 id="v2-floor-modal-title" className="text-lg font-semibold text-yellow-300">
                                           {v2FloorModalFloor}층 출현 카드팩
                                         </h4>
                                         <p className="text-xs text-gray-500 mt-0.5">
@@ -4382,9 +6866,9 @@ function FavoritesPageClient() {
                                 document.body
                               )}
                             <div className="mt-4 pt-4 border-t border-[#b8860b]/30">
-                              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                  <h4 className="text-sm font-semibold text-yellow-200/80">놓친 한정 에고기프트 출현 카드팩</h4>
+                              <div className="mb-2 flex w-full min-w-0 flex-wrap items-center gap-2">
+                                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                  <h4 className="text-lg font-semibold text-yellow-300">놓친 한정 에고기프트 출현 카드팩</h4>
                                   <span className="relative group shrink-0">
                                     <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#b8860b]/50 text-[#b8860b]/80 text-xs font-bold cursor-help">
                                       ?
@@ -4397,7 +6881,7 @@ function FavoritesPageClient() {
                                 <button
                                   type="button"
                                   onClick={() => setMissedLimitedCardPacksExpanded((v) => !v)}
-                                  className="shrink-0 p-1 rounded text-yellow-200/80 hover:text-yellow-100 hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
+                                  className="ml-auto shrink-0 rounded p-1 text-yellow-200/80 transition-colors hover:bg-white/10 hover:text-yellow-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
                                   aria-expanded={missedLimitedCardPacksExpanded}
                                   title={missedLimitedCardPacksExpanded ? "놓친 한정 카드팩 목록 접기" : "놓친 한정 카드팩 목록 펼치기"}
                                   aria-label={missedLimitedCardPacksExpanded ? "접기" : "펼치기"}
@@ -4466,17 +6950,88 @@ function FavoritesPageClient() {
                               </>
                               )}
                             </div>
+                            </>
+                            )}
                           </div>
                         )}
                         {selectedFavoriteId !== null && (
-                          <ObservedEgoGiftsSection
-                            catalog={observableEgoGiftCatalog}
-                            catalogLoading={observableEgoGiftCatalogLoading}
-                            selectedIds={observedEgoGiftIds}
-                            onChange={setObservedEgoGiftIds}
-                            imageBaseUrl={RESULT_EGOGIFT_BASE_URL}
-                            onOpenEgoGiftByName={(name) => egoGiftPreviewOpenRef.current?.(name)}
-                          />
+                          <div className="mb-4 rounded-lg border border-[#b8860b]/40 bg-[#131316] p-3 md:p-4">
+                            <div className="mb-2 flex w-full min-w-0 flex-wrap items-center gap-2 border-b border-[#b8860b]/30 pb-2">
+                              <h3 className="min-w-0 flex-1 text-lg font-semibold text-yellow-300">시작·관측 에고기프트</h3>
+                              <div className="ml-auto flex w-full min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => setPinnedEgoSectionsSimplified((v) => !v)}
+                                  className={`px-2 py-1 text-xs rounded border transition-colors ${
+                                    pinnedEgoSectionsSimplified
+                                      ? "text-cyan-300 border-cyan-400/60 bg-cyan-500/20 hover:bg-cyan-500/30"
+                                      : "text-gray-300 border-gray-400/40 hover:bg-white/10"
+                                  }`}
+                                  aria-pressed={pinnedEgoSectionsSimplified}
+                                  title={pinnedEgoSectionsSimplified ? "상세 보기로 원복" : "이름·키워드·합성 여부만 표시 (결과 탭 간소화와 동일)"}
+                                >
+                                  {pinnedEgoSectionsSimplified ? "상세 보기" : "간소화"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPinnedEgoSectionsExpanded((v) => !v)}
+                                  className="shrink-0 rounded p-1 text-yellow-200/80 transition-colors hover:bg-white/10 hover:text-yellow-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
+                                  aria-expanded={pinnedEgoSectionsExpanded}
+                                  title={pinnedEgoSectionsExpanded ? "접기" : "펼치기"}
+                                  aria-label={pinnedEgoSectionsExpanded ? "접기" : "펼치기"}
+                                >
+                                  <span
+                                    className={`inline-block transition-transform duration-200 ${pinnedEgoSectionsExpanded ? "rotate-90" : ""}`}
+                                    aria-hidden
+                                  >
+                                    ▶
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                            {pinnedEgoSectionsExpanded && (
+                              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-2 lg:gap-3">
+                                <ObservedEgoGiftsSection
+                                  className="mb-0"
+                                  compact={pinnedEgoSectionsSimplified}
+                                  catalog={observableEgoGiftCatalog}
+                                  catalogLoading={observableEgoGiftCatalogLoading}
+                                  selectedIds={startEgoGiftIds}
+                                  onChange={setStartEgoGiftIds}
+                                  imageBaseUrl={RESULT_EGOGIFT_BASE_URL}
+                                  onOpenEgoGiftByName={(name) => egoGiftPreviewOpenRef.current?.(name)}
+                                  sectionTitle="시작 에고기프트"
+                                  addLabel="시작 에고기프트 추가"
+                                  searchInputId="start-egogift-search"
+                                  fixedKeywordOptions={[...START_EGOGIFT_KEYWORD_ORDER]}
+                                  hideAllKeywordOption
+                                  hideSearchInput
+                                  allowedIdsByKeyword={{
+                                    화상: [7, 12, 15],
+                                    출혈: [29, 45, 46],
+                                    진동: [75, 76, 77],
+                                    파열: [113, 114, 116],
+                                    침잠: [148, 151, 152],
+                                    호흡: [178, 180, 181],
+                                    충전: [208, 209, 211],
+                                    참격: [240, 241, 242],
+                                    관통: [260, 261, 262],
+                                    타격: [273, 275, 276],
+                                  }}
+                                />
+                                <ObservedEgoGiftsSection
+                                  className="mb-0"
+                                  compact={pinnedEgoSectionsSimplified}
+                                  catalog={observableEgoGiftCatalog}
+                                  catalogLoading={observableEgoGiftCatalogLoading}
+                                  selectedIds={observedEgoGiftIds}
+                                  onChange={setObservedEgoGiftIds}
+                                  imageBaseUrl={RESULT_EGOGIFT_BASE_URL}
+                                  onOpenEgoGiftByName={(name) => egoGiftPreviewOpenRef.current?.(name)}
+                                />
+                              </div>
+                            )}
+                          </div>
                         )}
                         {resultEgoGiftsLoading ? (
                       <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
@@ -4489,8 +7044,31 @@ function FavoritesPageClient() {
                           <p className="text-gray-400">이 보고서에 등록된 카드팩이 없습니다.</p>
                         </div>
                         )}
+                        <div ref={reportEgoGiftPickSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-5">
+                          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                            <h3 className="text-lg font-semibold text-yellow-300">보고서 내 에고기프트 선택</h3>
+                            <ReportHelpTrigger sectionId="egoPick" onOpen={setReportSectionHelpId} />
+                          </div>
+                          <p className="text-xs text-gray-500 mb-3">
+                            별(즐겨찾기)로 이 보고서에 포함할 에고기프트를 고릅니다. 선택 시 보고서에 반영됩니다.
+                          </p>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-sm text-gray-300">
+                              선택됨{" "}
+                              <span className="text-amber-300 tabular-nums font-medium">{starredEgoGiftIds.length}</span>개
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setReportEgoGiftSelectModalOpen(true)}
+                              className="px-4 py-2 rounded bg-yellow-400/90 text-black text-sm font-semibold hover:bg-yellow-300 transition-colors"
+                            >
+                              에고기프트 검색·선택
+                            </button>
+                          </div>
+                          <ReportEgoGiftKeywordChainTable />
+                        </div>
                         <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6">
-                          <p className="text-gray-400">저장된 에고기프트가 없습니다. 에고기프트 탭에서 별을 눌러 추가해보세요.</p>
+                          <p className="text-gray-400">저장된 에고기프트가 없습니다. 위의 에고기프트 검색·선택에서 별을 눌러 추가해보세요.</p>
                         </div>
                       </div>
                     ) : starredEgoGiftIds.length > 0 && resultEgoGiftsByKeyword.length === 0 && starredCardPackIds.length === 0 ? (
@@ -4508,14 +7086,17 @@ function FavoritesPageClient() {
                       ) : (
                       <div ref={starredCardPacksSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6 mb-4 overflow-visible pb-10">
                         <div className="flex flex-wrap items-center gap-2 border-b border-[#b8860b]/40 pb-3 mb-3">
-                          <button
-                            type="button"
-                            onClick={captureStarredCardPacksSectionAsImage}
-                            className="text-base font-semibold text-yellow-200/90 text-left cursor-pointer hover:text-yellow-100 hover:underline focus:outline-none focus:underline"
-                            title="클릭 시 선택한 카드팩 목록 영역 전체를 이미지로 저장"
-                          >
-                            선택한 카드팩 목록
-                          </button>
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={captureStarredCardPacksSectionAsImage}
+                              className="cursor-pointer text-left text-lg font-semibold text-yellow-300 hover:text-yellow-100 hover:underline focus:outline-none focus:underline"
+                              title="클릭 시 선택한 카드팩 목록 영역 전체를 이미지로 저장"
+                            >
+                              선택한 카드팩 목록
+                            </button>
+                            <ReportHelpTrigger sectionId="cardpackStarred" onOpen={setReportSectionHelpId} />
+                          </div>
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
@@ -4667,9 +7248,9 @@ function FavoritesPageClient() {
                         </div>
                         {resultCardPackDifficulty != null && (
                           <div className="mt-6 pt-4 border-t border-[#b8860b]/30">
-                            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                <h4 className="text-sm font-semibold text-yellow-200/80">놓친 한정 에고기프트 출현 카드팩</h4>
+                            <div className="mb-2 flex w-full min-w-0 flex-wrap items-center gap-2">
+                              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                <h4 className="text-lg font-semibold text-yellow-300">놓친 한정 에고기프트 출현 카드팩</h4>
                                 <span className="relative group shrink-0">
                                   <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#b8860b]/50 text-[#b8860b]/80 text-xs font-bold cursor-help">?</span>
                                   <span className="absolute left-0 top-full mt-1.5 z-10 px-3 py-2 w-72 text-xs text-gray-200 bg-[#1a1a1d] border border-[#b8860b]/40 rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity pointer-events-none">
@@ -4680,7 +7261,7 @@ function FavoritesPageClient() {
                               <button
                                 type="button"
                                 onClick={() => setMissedLimitedCardPacksExpanded((v) => !v)}
-                                className="shrink-0 p-1 rounded text-yellow-200/80 hover:text-yellow-100 hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
+                                className="ml-auto shrink-0 rounded p-1 text-yellow-200/80 transition-colors hover:bg-white/10 hover:text-yellow-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/40"
                                 aria-expanded={missedLimitedCardPacksExpanded}
                                 title={missedLimitedCardPacksExpanded ? "놓친 한정 카드팩 목록 접기" : "놓친 한정 카드팩 목록 펼치기"}
                                 aria-label={missedLimitedCardPacksExpanded ? "접기" : "펼치기"}
@@ -4769,55 +7350,60 @@ function FavoritesPageClient() {
                       )}
                       </>
                       )}
+                      <div ref={reportEgoGiftPickSectionRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-5 mb-4">
+                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                          <h3 className="text-lg font-semibold text-yellow-300">보고서 내 에고기프트 선택</h3>
+                          <ReportHelpTrigger sectionId="egoPick" onOpen={setReportSectionHelpId} />
+                        </div>
+                        <p className="text-xs text-gray-500 mb-3">
+                          별(즐겨찾기)로 이 보고서에 포함할 에고기프트를 고릅니다. 선택 시 보고서에 반영됩니다.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-sm text-gray-300">
+                            선택됨{" "}
+                            <span className="text-amber-300 tabular-nums font-medium">{starredEgoGiftIds.length}</span>개
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setReportEgoGiftSelectModalOpen(true)}
+                            className="px-4 py-2 rounded bg-yellow-400/90 text-black text-sm font-semibold hover:bg-yellow-300 transition-colors"
+                          >
+                            에고기프트 검색·선택
+                          </button>
+                        </div>
+                        <ReportEgoGiftKeywordChainTable />
+                      </div>
                       {starredEgoGiftIds.length === 0 && (
                         <div className="bg-[#131316] border border-[#b8860b]/40 rounded p-4 md:p-6 mb-4">
-                          <p className="text-gray-400">저장된 에고기프트가 없습니다. 에고기프트 탭에서 별을 눌러 추가해보세요.</p>
+                          <p className="text-gray-400">저장된 에고기프트가 없습니다. 위의 에고기프트 검색·선택에서 별을 눌러 추가해보세요.</p>
                         </div>
                       )}
                       {starredEgoGiftIds.length > 0 && (
                       <div ref={allResultRef} className="bg-[#131316] border border-[#b8860b]/40 rounded-lg p-4 md:p-6">
                         <div className="border-b border-[#b8860b]/40 pb-4 mb-4">
                           <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
-                          <h2 className="text-lg font-semibold text-yellow-300">
-                            에고기프트
-                          </h2>
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <h2 className="text-lg font-semibold text-yellow-300">에고기프트</h2>
+                            <ReportHelpTrigger sectionId="egoList" onOpen={setReportSectionHelpId} />
+                          </div>
                           <div className="exclude-from-capture flex flex-wrap items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setResultEgoGiftViewMode("keyword")}
-                            className={`shrink-0 px-2 py-1.5 text-sm rounded border transition-colors flex items-center gap-1 ${
-                              resultEgoGiftViewMode === "keyword"
-                                ? "text-amber-200 border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
-                                : "text-gray-300 border-gray-400/40 hover:bg-white/10"
-                            }`}
-                            title="에고기프트를 키워드별로 나누어 표시합니다."
+                          <label htmlFor="favorites-result-ego-view-mode" className="sr-only">
+                            에고기프트 목록 표시 방식
+                          </label>
+                          <select
+                            id="favorites-result-ego-view-mode"
+                            value={resultEgoGiftViewMode}
+                            onChange={(e) => {
+                              const v = e.target.value as ResultEgoGiftViewMode;
+                              if (v === "keyword" || v === "flat" || v === "floor") setResultEgoGiftViewMode(v);
+                            }}
+                            className="min-w-[10.5rem] shrink-0 cursor-pointer rounded border border-gray-400/45 bg-[#1a1a1d] px-2 py-1.5 text-sm text-gray-200 outline-none transition-colors hover:border-amber-400/45 focus:border-amber-400/70 focus:ring-2 focus:ring-amber-400/35"
+                            title="키워드별 · 한 그리드 모아보기 · 층별 한정 요약 중 선택"
                           >
-                            키워드별 보기
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setResultEgoGiftViewMode("flat")}
-                            className={`shrink-0 px-2 py-1.5 text-sm rounded border transition-colors flex items-center gap-1 ${
-                              resultEgoGiftViewMode === "flat"
-                                ? "text-amber-200 border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
-                                : "text-gray-300 border-gray-400/40 hover:bg-white/10"
-                            }`}
-                            title="에고기프트를 한 그리드로 모아 표시합니다."
-                          >
-                            모아보기
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setResultEgoGiftViewMode("floor")}
-                            className={`shrink-0 px-2 py-1.5 text-sm rounded border transition-colors flex items-center gap-1 ${
-                              resultEgoGiftViewMode === "floor"
-                                ? "text-amber-200 border-amber-400/60 bg-amber-500/15 hover:bg-amber-500/25"
-                                : "text-gray-300 border-gray-400/40 hover:bg-white/10"
-                            }`}
-                            title="모아보기와 같이 한 그리드로 표시하고, 층별 선택 카드팩 기준 한정 에고기프트를 층 순으로 추가합니다."
-                          >
-                            층별 보기
-                          </button>
+                            <option value="keyword">키워드별 보기</option>
+                            <option value="flat">모아보기</option>
+                            <option value="floor">층별 보기</option>
+                          </select>
                           <button
                             type="button"
                             onClick={() => setResultSimplified((prev) => !prev)}
@@ -4830,9 +7416,9 @@ function FavoritesPageClient() {
                             type="button"
                             onClick={() => setCheckedEgoGiftIds([])}
                             className="shrink-0 px-2 py-1.5 text-sm rounded border border-cyan-400 bg-cyan-400/25 text-cyan-200 hover:bg-cyan-400/35 hover:text-cyan-100 transition-colors flex items-center gap-1 shadow-[0_0_12px_rgba(34,211,238,0.25)]"
-                            title="에고기프트 체크 전체 해제"
+                            title="획득 표시한 에고기프트 전체 해제"
                           >
-                            전체 선택 해제
+                            전체 획득 해제
                           </button>
                           </div>
                           </div>
@@ -5068,6 +7654,11 @@ function FavoritesPageClient() {
                                               row.limitedEgoGifts.length === 0 ? (
                                                 <div
                                                   key={`floor-lim-${row.floor}-${row.cardpackId}`}
+                                                  ref={(el) => {
+                                                    if (row.floor === 1) floorRangeSectionRefs.current["1-5"] = el;
+                                                    if (row.floor === 6) floorRangeSectionRefs.current["6-10"] = el;
+                                                    if (row.floor === 11) floorRangeSectionRefs.current["11-15"] = el;
+                                                  }}
                                                   className="rounded-lg border border-[#b8860b]/40 bg-[#131316]/90 px-3 py-3 md:px-4 md:py-3.5"
                                                 >
                                                   <div className="mb-2 text-sm font-bold tabular-nums text-amber-300/95">{row.floor}층</div>
@@ -5087,6 +7678,11 @@ function FavoritesPageClient() {
                                               ) : (
                                                 <div
                                                   key={`floor-lim-${row.floor}-${row.cardpackId}`}
+                                                  ref={(el) => {
+                                                    if (row.floor === 1) floorRangeSectionRefs.current["1-5"] = el;
+                                                    if (row.floor === 6) floorRangeSectionRefs.current["6-10"] = el;
+                                                    if (row.floor === 11) floorRangeSectionRefs.current["11-15"] = el;
+                                                  }}
                                                   className="min-w-0 max-w-full overflow-hidden rounded-lg border border-[#b8860b]/40 bg-[#131316]/90 p-3 md:p-4"
                                                 >
                                                   <div className="mb-2 text-sm font-bold tabular-nums text-amber-300/95">{row.floor}층</div>
@@ -5215,11 +7811,246 @@ function FavoritesPageClient() {
                     )}
                   </div>
                 )}
+                {selectedFavoriteId !== null && (
+                  <div
+                    className="pointer-events-none fixed bottom-5 z-[215] w-10"
+                    style={
+                      floatingNavLeftPx != null
+                        ? { left: floatingNavLeftPx }
+                        : { right: "1.25rem" }
+                    }
+                  >
+                    <div ref={resultFloatingNavRef} className="pointer-events-auto relative w-10">
+                    {resultFloatingNavOpen && (
+                      <div className="absolute right-full top-0 z-10 mr-2 w-[min(18rem,calc(100vw-2.5rem))] max-h-[min(60vh,30rem)] overflow-y-auto rounded-xl border border-[#b8860b]/45 bg-[#131316]/88 p-2 shadow-[0_10px_28px_rgba(0,0,0,0.45)] backdrop-blur-md">
+                        <div className="space-y-1">
+                          {activeTab === "result" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => scrollToSection(reportIdentitySectionRef.current)}
+                                className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-yellow-300 hover:bg-amber-500/20"
+                              >
+                                인격 선택 영역
+                              </button>
+                              {selectedReportSchemaVersion === 2 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => scrollToSection(v2PlannedCardPacksSectionRef.current)}
+                                  className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-yellow-300 hover:bg-amber-500/20"
+                                >
+                                  진행(예정) 카드팩 영역
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => scrollToSection(starredCardPacksSectionRef.current)}
+                                  className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-yellow-300 hover:bg-amber-500/20"
+                                >
+                                  선택 카드팩 영역
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  scrollToSection(allResultRef.current);
+                                  setResultFloatingNavEgoDepthOpen((v) => !v);
+                                }}
+                                className="flex w-full items-center justify-between rounded-md border border-[#b8860b]/35 bg-[#1a1a1d]/95 px-3 py-2 text-left text-sm font-semibold text-yellow-300 hover:bg-amber-500/20"
+                              >
+                                <span>에고기프트 영역</span>
+                                <span aria-hidden>{resultFloatingNavEgoDepthOpen ? "▲" : "▼"}</span>
+                              </button>
+                              {resultFloatingNavEgoDepthOpen && (
+                                <div className="ml-2 mt-1 space-y-1 border-l border-[#b8860b]/35 pl-2">
+                                  {resultEgoGiftViewMode === "keyword" && resultEgoGiftsByKeyword.length > 0 ? (
+                                    resultEgoGiftsByKeyword.map(({ keyword }) => (
+                                      <button
+                                        key={`floating-nav-kw-${keyword}`}
+                                        type="button"
+                                        onClick={() => scrollToSection(keywordSectionRefs.current[keyword])}
+                                        className="w-full rounded-md border border-[#b8860b]/25 bg-[#17171a]/90 px-2.5 py-1.5 text-left text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+                                      >
+                                        키워드: {keyword}
+                                      </button>
+                                    ))
+                                  ) : resultEgoGiftViewMode === "floor" ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => scrollToSection(floorRangeSectionRefs.current["1-5"])}
+                                        className="w-full rounded-md border border-[#b8860b]/25 bg-[#17171a]/90 px-2.5 py-1.5 text-left text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+                                      >
+                                        1~5층
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => scrollToSection(floorRangeSectionRefs.current["6-10"])}
+                                        className="w-full rounded-md border border-[#b8860b]/25 bg-[#17171a]/90 px-2.5 py-1.5 text-left text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+                                      >
+                                        6~10층
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => scrollToSection(floorRangeSectionRefs.current["11-15"])}
+                                        className="w-full rounded-md border border-[#b8860b]/25 bg-[#17171a]/90 px-2.5 py-1.5 text-left text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+                                      >
+                                        11~15층
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => scrollToSection(keywordSectionRefs.current[RESULT_EGO_FLAT_SECTION_KEY])}
+                                      className="w-full rounded-md border border-[#b8860b]/25 bg-[#17171a]/90 px-2.5 py-1.5 text-left text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+                                    >
+                                      모아보기 영역
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {shareBoardMode === "list" && (
+                                <button
+                                  type="button"
+                                  onClick={() => scrollToSection(shareBoardListSectionRef.current)}
+                                  className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-amber-100 hover:bg-amber-500/20"
+                                >
+                                  공유게시판 목록
+                                </button>
+                              )}
+                              {shareBoardMode === "new" && (
+                                <button
+                                  type="button"
+                                  onClick={() => scrollToSection(shareBoardNewSectionRef.current)}
+                                  className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-amber-100 hover:bg-amber-500/20"
+                                >
+                                  공유게시판 등록
+                                </button>
+                              )}
+                              {shareBoardMode === "detail" && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => scrollToSection(shareBoardDetailPostInfoSectionRef.current)}
+                                    className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-amber-100 hover:bg-amber-500/20"
+                                  >
+                                    게시글 정보
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => scrollToSection(shareBoardDetailPreviewSectionRef.current)}
+                                    className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-amber-100 hover:bg-amber-500/20"
+                                  >
+                                    보고서 미리보기
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => scrollToSection(shareBoardDetailCommentsSectionRef.current)}
+                                    className="w-full rounded-md border border-[#b8860b]/30 bg-[#1a1a1d]/90 px-3 py-2 text-left text-sm font-semibold text-amber-100 hover:bg-amber-500/20"
+                                  >
+                                    댓글
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={scrollToPageTop}
+                      className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b8860b]/55 bg-[#131316]/78 text-amber-100 shadow-[0_8px_18px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-amber-500/20"
+                      aria-label="최상단 이동"
+                      title="최상단 이동"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m6 11 6-6 6 6" />
+                      </svg>
+                    </button>
+                    {activeTab === "result" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => scrollToSection(reportIdentitySectionRef.current)}
+                          className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b8860b]/55 bg-[#131316]/78 text-sm font-bold text-amber-100 shadow-[0_8px_18px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-amber-500/20"
+                          aria-label="인격 선택 영역으로 이동"
+                          title="인격"
+                        >
+                          I
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            scrollToSection(
+                              selectedReportSchemaVersion === 2
+                                ? v2PlannedCardPacksSectionRef.current
+                                : starredCardPacksSectionRef.current
+                            )
+                          }
+                          className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b8860b]/55 bg-[#131316]/78 text-sm font-bold text-amber-100 shadow-[0_8px_18px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-amber-500/20"
+                          aria-label="카드팩 영역으로 이동"
+                          title="카드팩"
+                        >
+                          C
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollToSection(reportEgoGiftPickSectionRef.current)}
+                          className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b8860b]/55 bg-[#131316]/78 text-sm font-bold text-amber-100 shadow-[0_8px_18px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-amber-500/20"
+                          aria-label="보고서 내 에고기프트 선택으로 이동"
+                          title="에고기프트"
+                        >
+                          E
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setResultFloatingNavOpen((prev) => {
+                          const next = !prev;
+                          setResultFloatingNavEgoDepthOpen(next && activeTab === "result");
+                          return next;
+                        })
+                      }
+                      className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b8860b]/55 bg-[#131316]/78 text-amber-100 shadow-[0_8px_18px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-amber-500/20"
+                      aria-label="영역 이동 메뉴 열기"
+                      title="영역 이동 메뉴"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" d="M5 7h14" />
+                        <path strokeLinecap="round" d="M5 12h14" />
+                        <path strokeLinecap="round" d="M5 17h14" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={scrollToPageBottom}
+                      className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#b8860b]/55 bg-[#131316]/78 text-amber-100 shadow-[0_8px_18px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:bg-amber-500/20"
+                      aria-label="최하단 이동"
+                      title="최하단 이동"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m18 13-6 6-6-6" />
+                      </svg>
+                    </button>
+                    </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
-          {/* 에고기프트/카드팩 상세 모달 오픈 ref를 항상 유지하기 위해 백그라운드 상시 마운트 */}
+          {/* 에고기프트/카드팩 상세 모달 오픈 ref를 항상 유지하기 위해 백그라운드 상시 마운트 (에고기프트 선택 모달이 열린 동안은 모달 쪽 인스턴스만 마운트) */}
           <div className="pointer-events-none absolute -left-[99999px] top-0 h-px w-px overflow-hidden" aria-hidden="true">
+            {!reportEgoGiftSelectModalOpen && (
             <EgoGiftPageContent
               slotAboveSearch={null}
               embedded
@@ -5228,6 +8059,7 @@ function FavoritesPageClient() {
               openEgoGiftPreviewRef={egoGiftPreviewOpenRef}
               enableSynthesisMaterialsPrefetch
             />
+            )}
             <CardPackPageContent
               slotAboveSearch={null}
               embedded
@@ -5236,6 +8068,48 @@ function FavoritesPageClient() {
               openCardPackDetailRef={cardPackDetailOpenRef}
             />
           </div>
+          {reportEgoGiftSelectModalOpen && typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="fixed inset-0 z-[240] flex items-center justify-center p-3 sm:p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="report-egogift-modal-title"
+              >
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-black/70 cursor-default"
+                  aria-label="모달 닫기"
+                  onClick={() => setReportEgoGiftSelectModalOpen(false)}
+                />
+                <div className="relative z-10 flex h-[calc(100dvh-1.5rem)] max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-[#b8860b]/50 bg-[#0d0d0f] shadow-[0_12px_40px_rgba(0,0,0,0.55)] sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]">
+                  <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#b8860b]/35 bg-[#131316] px-4 py-3">
+                    <h2 id="report-egogift-modal-title" className="text-lg font-semibold text-yellow-300">
+                      보고서 내 에고기프트 선택
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setReportEgoGiftSelectModalOpen(false)}
+                      className="shrink-0 rounded border border-[#b8860b]/40 px-3 py-1.5 text-sm text-gray-200 hover:bg-[#2a2a2d] hover:text-yellow-200 transition-colors"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 md:p-4">
+                    <EgoGiftPageContent
+                      embedded
+                      embeddedModalLayout
+                      starredEgoGiftIds={starredEgoGiftIds}
+                      onStarClick={handleStarToggle}
+                      openEgoGiftPreviewRef={egoGiftPreviewOpenRef}
+                      enableSynthesisMaterialsPrefetch
+                    />
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+          <ReportSectionHelpModal sectionId={reportSectionHelpId} onClose={() => setReportSectionHelpId(null)} />
         </div>
       </div>
     </div>

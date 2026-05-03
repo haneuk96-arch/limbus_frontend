@@ -14,6 +14,7 @@ export const RESULT_KEYWORD_ICON_MAP: Record<string, string> = {
   침잠: "/images/keyword/Sinking.webp",
   호흡: "/images/keyword/Poise.webp",
   충전: "/images/keyword/Charge.webp",
+  탄환: "/images/keyword/bullet.webp",
   참격: "/images/keyword/slash.webp",
   관통: "/images/keyword/penetration.webp",
   타격: "/images/keyword/blow.webp",
@@ -56,6 +57,34 @@ function tierDisplay(tier: string | undefined): string {
   if (t === "4") return "Ⅳ";
   if (t === "5") return "Ⅴ";
   return "－";
+}
+
+/** 획득 체크: 짙은 녹색 외곽 + 밝은 초록 내부 */
+function EgoGiftAcquireCheckSvg({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-hidden
+    >
+      <polyline
+        points="20 6 9 17 4 12"
+        stroke="#14532d"
+        strokeWidth={5.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <polyline
+        points="20 6 9 17 4 12"
+        stroke="#4ade80"
+        strokeWidth={3.25}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 /** 재료·결과 중 하나라도 목록에 있으면 해당 조합식 포함 */
@@ -135,9 +164,9 @@ export function SynthesisRecipesSubsetBlock({
   const getGradesFromResult = (egogiftId: number) => resultEgoGifts.find((eg) => eg.egogiftId === egogiftId)?.grades ?? [];
   /** 조합식 행마다 +·= 이 같은 가로 폭; px·mono로 글리프 좌우 여백 체감을 맞춤 */
   const synthesisOpClassSimplified =
-    "inline-flex w-9 min-w-9 shrink-0 items-center justify-center px-1.5 align-middle font-mono font-bold tabular-nums text-amber-400/80";
+    "inline-flex w-6 min-w-6 shrink-0 items-center justify-center px-0.5 align-middle font-mono text-xs font-bold tabular-nums text-amber-400/80 lg:w-9 lg:min-w-9 lg:px-1.5 lg:text-base";
   const synthesisOpClassCard =
-    "mt-8 inline-flex w-9 min-w-9 shrink-0 items-center justify-center self-start px-1.5 font-mono text-xl font-bold tabular-nums leading-none text-amber-400/80 select-none";
+    "mt-3 inline-flex w-5 min-w-5 shrink-0 items-center justify-center self-start px-0.5 font-mono text-sm font-bold tabular-nums leading-none text-amber-400/80 select-none lg:mt-8 lg:w-9 lg:min-w-9 lg:px-1.5 lg:text-xl";
   const EgogiftMiniCard = ({
     thumbnail,
     giftName,
@@ -154,9 +183,9 @@ export function SynthesisRecipesSubsetBlock({
       title="에고기프트 상세 보기"
       aria-label={`${giftName} 상세 보기`}
       onClick={() => openEgoGiftPreviewByName(giftName)}
-      className={`flex w-[5.25rem] max-w-[5.25rem] min-w-0 shrink-0 flex-col items-center overflow-hidden rounded p-2 bg-[#131316] text-left transition-colors hover:bg-[#1a1a1f] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] ${getMiniCardBorderClass(grades)}`}
+      className={`flex min-w-0 shrink-0 flex-col items-center overflow-hidden rounded bg-[#131316] p-1 text-left transition-colors hover:bg-[#1a1a1f] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] w-[2.65rem] max-w-[2.65rem] lg:w-[5.25rem] lg:max-w-[5.25rem] lg:p-2 ${getMiniCardBorderClass(grades)}`}
     >
-      <div className="relative aspect-square w-20 max-w-full shrink-0">
+      <div className="relative aspect-square w-full max-w-full shrink-0">
         <img src="/images/egogift/egogift_frame.webp" alt="" className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none z-0" />
         {thumbnail ? (
           <img
@@ -174,7 +203,7 @@ export function SynthesisRecipesSubsetBlock({
         )}
       </div>
       <div
-        className="mt-1 w-full max-w-full px-0.5 text-center text-[11px] font-medium leading-snug text-gray-300 break-words [overflow-wrap:anywhere] line-clamp-3"
+        className="mt-0.5 w-full max-w-full px-0 text-center text-[7px] font-medium leading-tight text-gray-300 break-words [overflow-wrap:anywhere] line-clamp-2 lg:mt-1 lg:px-0.5 lg:text-[11px] lg:leading-snug lg:line-clamp-3"
       >
         {giftName}
       </div>
@@ -253,7 +282,7 @@ export function SynthesisRecipesSubsetBlock({
               className={
                 resultSimplified
                   ? "min-w-0 max-w-full overflow-hidden rounded border border-[#b8860b]/20 bg-[#1a1a1a]/60 px-2 py-1 text-xs text-gray-300 break-words [overflow-wrap:anywhere]"
-                  : "flex min-w-0 max-w-full flex-wrap items-start justify-start gap-x-2 gap-y-2 text-xs"
+                  : "flex min-w-0 max-w-full flex-nowrap items-start justify-start gap-x-1 gap-y-2 overflow-x-auto text-xs lg:flex-wrap lg:gap-x-2 lg:gap-y-2 lg:overflow-visible"
               }
             >
               {resultSimplified ? (
@@ -294,7 +323,7 @@ export function SynthesisRecipesSubsetBlock({
                   {recipe.materials.map((mat, i) => (
                     <span
                       key={`${recipe.resultEgogiftId}-mat-${i}`}
-                      className="inline-flex min-w-0 max-w-full shrink-0 items-start gap-x-2"
+                      className="inline-flex min-w-0 max-w-full shrink-0 items-start gap-x-1 lg:gap-x-2"
                     >
                       {i > 0 && (
                         <span className={synthesisOpClassCard} aria-hidden>
@@ -423,7 +452,7 @@ export function ResultKeywordSection({
           <button
             type="button"
             onClick={() => onCaptureSection(keyword, false)}
-            className="text-lg font-semibold text-yellow-200/90 flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer hover:text-yellow-100 hover:underline focus:outline-none focus:underline rounded px-0 py-0"
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded px-0 py-0 text-left text-lg font-semibold text-yellow-300 hover:text-yellow-100 hover:underline focus:outline-none focus:underline"
             title="클릭 시 이 키워드 에고기프트만 이미지로 저장 (조합식 제외)"
           >
             {RESULT_KEYWORD_ICON_MAP[keyword] && (
@@ -449,8 +478,9 @@ export function ResultKeywordSection({
           <div
             className={
               (resultSimplified
-                ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
-                : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4") + gridExtraClass
+                ? /** lg 미만: 시작·관측 에고와 동일 3열·간격 */
+                  "grid grid-cols-3 gap-1.5 sm:gap-2 md:gap-3 lg:grid-cols-5 xl:grid-cols-6"
+                : "grid grid-cols-3 gap-2 sm:gap-3 md:gap-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6") + gridExtraClass
             }
           >
             {egogifts.map((eg) => {
@@ -488,7 +518,7 @@ export function ResultKeywordSection({
                         }
                       }
                     }}
-                    className={`group relative rounded-lg p-3 min-w-0 flex flex-col gap-1 text-left transition-[box-shadow,filter] shadow-sm cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/60 ${!readOnly && checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
+                    className={`group relative min-w-0 cursor-pointer rounded-lg p-2 text-left shadow-sm outline-none transition-[box-shadow,filter] sm:p-3 flex flex-col gap-1 focus-visible:ring-2 focus-visible:ring-yellow-400/60 ${!readOnly && checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
                   >
                     {!readOnly && checked && (
                       <div
@@ -496,31 +526,44 @@ export function ResultKeywordSection({
                         aria-hidden
                       />
                     )}
-                    <div className="relative z-0 min-w-0 pr-[22%] flex flex-col gap-1">
-                      <div className="flex items-baseline gap-1.5 flex-wrap">
-                        <span className="result-egogift-tier text-amber-400/90 font-bold text-sm shrink-0">{tierDisplay(eg.giftTier)}</span>
-                        <span className="result-egogift-name text-gray-200 font-medium text-sm break-words leading-tight">{eg.giftName}</span>
+                    <div className="relative z-0 flex min-w-0 flex-col gap-1 pr-[22%]">
+                      <div className="flex flex-wrap items-baseline gap-1 sm:gap-1.5">
+                        <span className="result-egogift-tier shrink-0 text-xs font-bold text-amber-400/90 sm:text-sm">
+                          {tierDisplay(eg.giftTier)}
+                        </span>
+                        <span className="result-egogift-name min-w-0 break-words text-xs font-medium leading-tight text-gray-200 sm:text-sm">
+                          {eg.giftName}
+                        </span>
                       </div>
                       {isPriorityStackAssist(eg.priorityYn) && (
-                        <div className="text-green-400 text-xs font-medium">스택보조</div>
+                        <div className="text-[10px] font-medium text-green-400 sm:text-xs">스택보조</div>
                       )}
                       {eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0 && (
-                        <div className="text-gray-400 text-xs break-words leading-tight">
+                        <div className="break-words text-[10px] leading-tight text-gray-400 sm:text-xs">
                           {eg.limitedCategoryNames.map((n) => `"${n}"`).join(", ")}
                         </div>
                       )}
-                      {eg.synthesisYn === "Y" && <div className="text-purple-300 text-xs">합성전용</div>}
+                      {eg.synthesisYn === "Y" && (
+                        <div className="text-[10px] text-purple-300 sm:text-xs">합성전용</div>
+                      )}
                     </div>
                     {/* 우측 정보 보기 제외 본문: 호버 시 획득 / 획득 해제 */}
                     {!readOnly && (
                       <>
                         <div
-                          className="result-egogift-acquire-zone pointer-events-auto absolute left-0 top-0 right-[20%] bottom-0 z-[22] flex items-center justify-center rounded-md bg-black/0 transition-colors duration-200 group/acquire hover:bg-black/50"
+                          className="result-egogift-acquire-zone pointer-events-none absolute left-0 top-0 right-[20%] bottom-0 z-[22] rounded-md bg-transparent transition-colors duration-200 group-hover:pointer-events-auto group-hover:bg-black/20 group/acquire hover:!bg-amber-500/35"
                           aria-hidden
                         >
-                          <span className="pointer-events-none relative z-[1] px-1 text-center text-xs font-bold leading-tight text-white opacity-0 transition-opacity duration-200 group-hover/acquire:opacity-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:text-sm">
-                            {checked ? "획득 해제" : "획득"}
-                          </span>
+                          {checked && (
+                            <div className="absolute inset-0 z-[2] flex items-center justify-center pointer-events-none">
+                              <EgoGiftAcquireCheckSvg className="h-9 w-9 shrink-0 drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)] transition-opacity duration-200 group-hover:opacity-0 sm:h-11 sm:w-11" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 z-[3] flex items-center justify-center pointer-events-none">
+                            <span className="px-1 text-center text-xs font-bold leading-tight text-transparent opacity-0 transition-[opacity,color] duration-200 group-hover:opacity-100 group-hover:text-gray-200 group-hover/acquire:!text-amber-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:text-sm">
+                              {checked ? "획득 해제" : "획득"}
+                            </span>
+                          </div>
                         </div>
                         <button
                           type="button"
@@ -532,9 +575,9 @@ export function ResultKeywordSection({
                             triggerZoneClickFlash(eg.egogiftId, "info");
                             egoGiftPreviewOpenRef.current?.(eg.giftName);
                           }}
-                          className={`absolute top-0 right-0 bottom-0 z-[24] flex w-[20%] min-w-[2rem] items-center justify-center border-l border-amber-800/25 bg-yellow-400/72 text-[10px] font-semibold leading-tight text-black/90 opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-[2px] transition-opacity pointer-events-none [writing-mode:vertical-rl] group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
+                          className={`absolute top-0 right-0 bottom-0 z-[24] flex w-[20%] min-w-[2rem] items-center justify-center border-l border-transparent bg-transparent text-[10px] font-semibold leading-tight text-transparent shadow-none transition-[background-color,color,box-shadow,transform,border-color] pointer-events-none group-hover:pointer-events-auto group-hover:border-[#b8860b]/25 group-hover:bg-black/30 group-hover:text-gray-200 [writing-mode:vertical-rl] hover:!border-amber-800/35 hover:!bg-amber-500/35 hover:!text-amber-100 focus:outline-none focus-visible:pointer-events-auto focus-visible:border-amber-800/40 focus-visible:bg-amber-500/40 focus-visible:text-amber-100 focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
                             infoFlashing
-                              ? "z-[28] !opacity-100 bg-yellow-300/88 text-black outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_22px_rgba(251,191,36,0.5)] scale-[1.03]"
+                              ? "z-[28] !opacity-100 border-amber-800/50 !text-amber-100 bg-amber-500/40 outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_22px_rgba(251,191,36,0.5)] scale-[1.03]"
                               : ""
                           }`}
                         >
@@ -579,7 +622,7 @@ export function ResultKeywordSection({
                       }
                     }
                   }}
-                  className={`group relative rounded p-3 min-w-0 flex flex-col cursor-pointer transition-all outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] ${!readOnly && checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
+                  className={`group relative flex min-h-0 min-w-0 cursor-pointer flex-col rounded p-1.5 outline-none transition-all focus-visible:ring-2 focus-visible:ring-yellow-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0f] sm:p-2 md:p-3 ${!readOnly && checked ? "result-egogift-card--checked brightness-[0.82]" : "hover:ring-1 hover:ring-yellow-400/40"} ${difficultyClass}`}
                 >
                   {!readOnly && checked && (
                     <div
@@ -599,9 +642,9 @@ export function ResultKeywordSection({
                           triggerZoneClickFlash(eg.egogiftId, "info");
                           egoGiftPreviewOpenRef.current?.(eg.giftName);
                         }}
-                        className={`absolute top-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-b border-amber-800/28 bg-yellow-400/72 text-xs font-semibold text-black/90 opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-[2px] transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
+                        className={`absolute top-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-b border-transparent bg-transparent text-xs font-semibold text-transparent shadow-none transition-[background-color,color,box-shadow,transform,border-color] pointer-events-none group-hover:pointer-events-auto group-hover:border-[#b8860b]/25 group-hover:bg-black/30 group-hover:text-gray-200 hover:!border-amber-800/35 hover:!bg-amber-500/35 hover:!text-amber-100 focus:outline-none focus-visible:pointer-events-auto focus-visible:border-amber-800/40 focus-visible:bg-amber-500/40 focus-visible:text-amber-100 focus-visible:ring-2 focus-visible:ring-amber-800/60 focus-visible:ring-inset ${zoneFlashBaseTransition} ${
                           infoFlashing
-                            ? "z-[32] !opacity-100 bg-yellow-300/88 text-black outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_24px_rgba(251,191,36,0.5)] scale-[1.02]"
+                            ? "z-[32] !opacity-100 border-amber-800/50 !text-amber-100 bg-amber-500/40 outline outline-2 outline-amber-800/50 outline-offset-0 shadow-[0_0_0_3px_rgba(180,83,9,0.35),0_0_24px_rgba(251,191,36,0.5)] scale-[1.02]"
                             : ""
                         }`}
                       >
@@ -609,27 +652,39 @@ export function ResultKeywordSection({
                       </button>
                       {/* 상단 정보 보기 ↔ 하단 삭제 사이 */}
                       <div
-                        className="result-egogift-acquire-zone pointer-events-auto absolute left-0 right-0 top-[20%] bottom-[20%] z-[22] flex items-center justify-center rounded-sm bg-black/0 transition-colors duration-200 group/acquire hover:bg-black/50"
+                        className="result-egogift-acquire-zone pointer-events-none absolute left-0 right-0 top-[20%] bottom-[20%] z-[22] rounded-sm bg-transparent transition-colors duration-200 group-hover:pointer-events-auto group-hover:bg-black/20 group/acquire hover:!bg-amber-500/35"
                         aria-hidden
                       >
-                        <span className="pointer-events-none relative z-[1] px-2 text-center text-sm font-bold text-white opacity-0 transition-opacity duration-200 group-hover/acquire:opacity-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
-                          {checked ? "획득 해제" : "획득"}
-                        </span>
+                        <div className="absolute inset-0 z-[3] flex items-center justify-center pointer-events-none">
+                          <span className="px-2 text-center text-sm font-bold text-transparent opacity-0 transition-[opacity,color] duration-200 group-hover:opacity-100 group-hover:text-gray-200 group-hover/acquire:!text-amber-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
+                            {checked ? "획득 해제" : "획득"}
+                          </span>
+                        </div>
                       </div>
                     </>
                   )}
-                  <div className="relative aspect-square mb-2 flex-shrink-0">
+                  <div
+                    className={`relative mb-2 aspect-square flex-shrink-0 ${checked ? "z-[15]" : ""}`}
+                  >
+                    {checked && (
+                      <div
+                        className="pointer-events-none absolute inset-0 z-[12] flex items-center justify-center bg-black/15"
+                        aria-hidden
+                      >
+                        <EgoGiftAcquireCheckSvg className="h-14 w-14 shrink-0 drop-shadow-[0_3px_10px_rgba(0,0,0,0.7)] transition-opacity duration-200 group-hover:opacity-0 sm:h-16 sm:w-16 md:h-[4.5rem] md:w-[4.5rem]" />
+                      </div>
+                    )}
                     <img
                       src="/images/egogift/egogift_frame.webp"
                       alt="frame"
-                      className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none z-0"
+                      className="pointer-events-none absolute inset-0 z-0 h-full w-full select-none object-contain"
                     />
-                    <div className="result-egogift-tier absolute top-1 -left-3 z-20 text-5xl scale-x-[0.65] select-none tracking-tight leading-none font-black">
+                    <div className="result-egogift-tier absolute top-0.5 -left-1.5 z-20 scale-x-[0.65] select-none font-black leading-none tracking-tight text-amber-100/95 drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)] text-2xl sm:top-1 sm:-left-2 sm:text-3xl md:-left-3 md:text-4xl lg:text-5xl">
                       {tierDisplay(eg.giftTier)}
                     </div>
                     {keywordIcon && eg.keywordName && (
-                      <div className="absolute bottom-[5px] right-[0px] w-9 h-9 z-20 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)]">
-                        <img src={keywordIcon} alt={eg.keywordName} className="w-full h-full object-contain" />
+                      <div className="absolute bottom-0.5 right-0 z-20 h-6 w-6 drop-shadow-[0_0_6px_rgba(0,0,0,0.9)] sm:bottom-[5px] sm:h-7 sm:w-7 md:h-8 md:w-8 lg:h-9 lg:w-9">
+                        <img src={keywordIcon} alt={eg.keywordName} className="h-full w-full object-contain" />
                       </div>
                     )}
                     {eg.thumbnail ? (
@@ -647,14 +702,18 @@ export function ResultKeywordSection({
                       </div>
                     )}
                   </div>
-                  <div className="result-egogift-card-text text-base text-center text-gray-300 font-medium flex-1">
+                  <div className="result-egogift-card-text flex-1 text-center text-[10px] font-medium leading-snug text-gray-300 sm:text-xs md:text-sm lg:text-base">
                     <div className="result-egogift-name break-words leading-tight">{eg.giftName}</div>
                     {isPriorityStackAssist(eg.priorityYn) && (
-                      <div className="result-egogift-label text-green-400 text-xs break-words font-medium">스택보조</div>
+                      <div className="result-egogift-label break-words text-[9px] font-medium text-green-400 sm:text-[10px] md:text-xs">
+                        스택보조
+                      </div>
                     )}
-                    {eg.synthesisYn === "Y" && <div className="result-egogift-label text-purple-300 text-xs break-words">합성전용</div>}
+                    {eg.synthesisYn === "Y" && (
+                      <div className="result-egogift-label break-words text-[9px] text-purple-300 sm:text-[10px] md:text-xs">합성전용</div>
+                    )}
                     {eg.limitedCategoryNames && eg.limitedCategoryNames.length > 0 && (
-                      <div className="result-egogift-label text-yellow-200/90 text-xs break-words leading-tight">
+                      <div className="result-egogift-label break-words text-[9px] leading-tight text-yellow-200/90 sm:text-[10px] md:text-xs">
                         {eg.limitedCategoryNames.map((n) => `"${n}"`).join(", ")} 카드팩 한정
                       </div>
                     )}
@@ -670,9 +729,9 @@ export function ResultKeywordSection({
                         triggerZoneClickFlash(eg.egogiftId, "delete");
                         onRemoveStarredEgoGift(eg.egogiftId);
                       }}
-                      className={`absolute bottom-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-t border-red-400/40 bg-red-950/80 text-xs font-semibold text-red-200/95 opacity-0 shadow-[inset_0_0_14px_rgba(0,0,0,0.4)] transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus:opacity-100 focus:pointer-events-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/90 focus-visible:ring-inset exclude-from-capture ${zoneFlashBaseTransition} ${
+                      className={`absolute bottom-0 left-0 right-0 z-[25] flex h-[20%] min-h-[2.25rem] items-center justify-center border-t border-transparent bg-transparent text-xs font-semibold text-transparent shadow-none transition-[background-color,color,box-shadow,transform,border-color] pointer-events-none group-hover:pointer-events-auto group-hover:border-[#b8860b]/25 group-hover:bg-black/30 group-hover:text-gray-200 hover:!border-red-400/50 hover:!bg-red-500/35 hover:!text-red-100 focus:outline-none focus-visible:pointer-events-auto focus-visible:border-red-400/55 focus-visible:bg-red-500/35 focus-visible:text-red-100 focus-visible:ring-2 focus-visible:ring-red-400/90 focus-visible:ring-inset exclude-from-capture ${zoneFlashBaseTransition} ${
                         deleteFlashing
-                          ? "z-[32] !opacity-100 outline outline-2 outline-red-300 outline-offset-0 bg-red-600/45 shadow-[0_0_0_3px_rgba(248,113,113,0.55),0_0_26px_rgba(239,68,68,0.55)] scale-[1.02]"
+                          ? "z-[32] !opacity-100 !text-red-100 outline outline-2 outline-red-300 outline-offset-0 border-red-400/50 bg-red-600/45 shadow-[0_0_0_3px_rgba(248,113,113,0.55),0_0_26px_rgba(239,68,68,0.55)] scale-[1.02]"
                           : ""
                       }`}
                     >

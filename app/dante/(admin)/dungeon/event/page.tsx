@@ -370,6 +370,9 @@ export default function DungeonEventPage() {
       {previewOpen && previewEvent && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dungeon-event-preview-title"
           onClick={() => {
             setPreviewOpen(false);
             setOpenedNodes(new Set());
@@ -379,10 +382,10 @@ export default function DungeonEventPage() {
             className="bg-[#131316] border border-red-700 rounded-lg max-w-4xl w-full mx-4 h-[90vh] flex flex-col p-4 sm:p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="flex-1 overflow-y-auto">
               <div className="flex justify-between items-center mb-4 flex-shrink-0">
                 <div>
-                  <h2 className="text-lg sm:text-xl font-bold text-yellow-300">{previewEvent.title}</h2>
+                  <h2 id="dungeon-event-preview-title" className="text-lg sm:text-xl font-bold text-yellow-300">{previewEvent.title}</h2>
                 </div>
               <button
                 onClick={() => {

@@ -121,3 +121,60 @@ body {
 .capture-exclude-synthesis .result-synthesis-block {
   display: none !important;
 }
+
+/*
+ * 모달 안 스크롤바 — [role="dialog"] 또는 [aria-modal="true"] 트리 전체
+ * (Firefox: scrollbar-color / WebKit: ::-webkit-scrollbar)
+ */
+[role="dialog"],
+[role="dialog"] *,
+[aria-modal="true"],
+[aria-modal="true"] * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(184, 134, 11, 0.55) rgba(13, 13, 18, 0.98);
+}
+
+[role="dialog"]::-webkit-scrollbar,
+[role="dialog"] *::-webkit-scrollbar,
+[aria-modal="true"]::-webkit-scrollbar,
+[aria-modal="true"] *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+[role="dialog"]::-webkit-scrollbar-track,
+[role="dialog"] *::-webkit-scrollbar-track,
+[aria-modal="true"]::-webkit-scrollbar-track,
+[aria-modal="true"] *::-webkit-scrollbar-track {
+  background: rgba(13, 13, 18, 0.95);
+  border-radius: 9999px;
+}
+
+[role="dialog"]::-webkit-scrollbar-thumb,
+[role="dialog"] *::-webkit-scrollbar-thumb,
+[aria-modal="true"]::-webkit-scrollbar-thumb,
+[aria-modal="true"] *::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(212, 175, 55, 0.45),
+    rgba(184, 134, 11, 0.4)
+  );
+  border-radius: 9999px;
+  border: 2px solid rgba(13, 13, 18, 0.98);
+  background-clip: padding-box;
+}
+
+[role="dialog"]::-webkit-scrollbar-thumb:hover,
+[role="dialog"] *::-webkit-scrollbar-thumb:hover,
+[aria-modal="true"]::-webkit-scrollbar-thumb:hover,
+[aria-modal="true"] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.55);
+  border: 2px solid rgba(13, 13, 18, 0.98);
+}
+
+[role="dialog"]::-webkit-scrollbar-corner,
+[role="dialog"] *::-webkit-scrollbar-corner,
+[aria-modal="true"]::-webkit-scrollbar-corner,
+[aria-modal="true"] *::-webkit-scrollbar-corner {
+  background: rgba(13, 13, 18, 0.95);
+}

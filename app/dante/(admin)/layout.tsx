@@ -66,6 +66,14 @@ export default function DanteLayout({ children }: { children: React.ReactNode })
         { name: "등장 적", path: "/dante/dungeon/enemy" },
       ],
     },
+    {
+      name: "인격 관리",
+      path: "/dante/personality",
+      subMenus: [
+        { name: "인격 목록", path: "/dante/personality" },
+        { name: "E.G.O 목록", path: "/dante/personality/ego" },
+      ],
+    },
   ];
 
   const logout = async () => {

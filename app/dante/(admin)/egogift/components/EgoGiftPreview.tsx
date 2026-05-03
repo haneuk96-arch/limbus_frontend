@@ -254,11 +254,17 @@ export default function EgoGiftPreview({
 
   return (
     <>
-    <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-[9999] overflow-y-auto pt-20 pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" onClick={onClose}>
-      <div className="bg-[#1b1b1b] border border-[#b8860b]/40 rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[calc(100vh-6rem)] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-start justify-center z-[9999] overflow-y-auto pt-20 pb-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="admin-egogift-preview-title"
+      onClick={onClose}
+    >
+      <div className="bg-[#1b1b1b] border border-[#b8860b]/40 rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[calc(100vh-6rem)] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className={`sticky top-0 ${bgColorClass} border-b border-[#b8860b]/40 rounded-t-lg px-5 py-4 z-50 flex justify-between items-center backdrop-blur-sm`}>
           <div className="flex items-center gap-3 flex-1">
-            <span className="text-gray-200 text-xl font-semibold">에고기프트 상세보기</span>
+            <span id="admin-egogift-preview-title" className="text-gray-200 text-xl font-semibold">에고기프트 상세보기</span>
           </div>
           <div className="flex items-center gap-2">
             {egogiftId && onEdit && (

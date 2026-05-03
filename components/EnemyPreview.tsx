@@ -437,15 +437,18 @@ export default function EnemyPreview({
     <div
       className="fixed inset-0 bg-black/80 flex items-center justify-center p-4"
       style={{ zIndex: overlayZIndex }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="enemy-preview-modal-title"
       onClick={onClose}
     >
       <div
-        className="bg-[#131316] border border-[#b8860b]/40 rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden shadow-lg shadow-[#ffcc33]/10"
+        className="bg-[#131316] border border-[#b8860b]/40 rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-lg shadow-[#ffcc33]/10"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
         <div className="sticky top-0 bg-[#131316] border-b border-[#b8860b]/40 p-4 flex justify-between items-center z-10">
-          <h2 className="text-2xl font-bold text-[#ffcc33]">{enemyData.name}</h2>
+          <h2 id="enemy-preview-modal-title" className="text-2xl font-bold text-[#ffcc33]">{enemyData.name}</h2>
           <div className="flex gap-2">
             {onEdit && (
               <button
